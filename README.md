@@ -127,6 +127,13 @@ npm run check
 - `server.js`
 - `public/app.js`
 
+## 开发文档
+
+- [架构说明](docs/ARCHITECTURE.md)
+- [API 说明](docs/API.md)
+- [贡献指南](CONTRIBUTING.md)
+- [更新日志](CHANGELOG.md)
+
 ## 安全说明
 
 - 不要把 `.env`、API Key、玩家存档或会话记忆提交到公开仓库。
