@@ -6,6 +6,8 @@
 http://localhost:8787
 ```
 
+开发模式下，React/Vite 前端运行在 `http://127.0.0.1:5173`，并把 `/api` 代理到后端。
+
 所有接口默认使用 JSON。
 
 ## GET /api/bootstrap

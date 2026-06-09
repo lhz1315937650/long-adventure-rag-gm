@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 8787);
 const DATA_DIR = path.join(__dirname, "data");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const FRONTEND_DIST_DIR = path.join(__dirname, "frontend", "dist");
 const LORE_DIR = path.join(__dirname, "lore");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
 const GROWTH_DIR = path.join(DATA_DIR, "growth");
@@ -129,7 +129,6 @@ function ensureProjectFiles() {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
   fs.mkdirSync(path.join(__dirname, "prompts"), { recursive: true });
-  fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
   if (!fs.existsSync(RULES_FILE)) writeJson(RULES_FILE, defaultRules());
   if (!fs.existsSync(STATE_FILE)) writeJson(STATE_FILE, defaultState());
@@ -1335,16 +1334,23 @@ function sendJson(res, body, status = 200) {
 
 function serveStatic(requestPath, res) {
   const pathname = decodeURIComponent(requestPath === "/" ? "/index.html" : requestPath);
-  const filePath = path.normalize(path.join(PUBLIC_DIR, pathname));
-  if (!filePath.startsWith(PUBLIC_DIR)) return sendJson(res, { error: "Forbidden" }, 403);
+  if (!fs.existsSync(FRONTEND_DIST_DIR)) {
+    return sendJson(res, {
+      error: "前端尚未构建。请先运行 npm run build，或直接运行 npm start。"
+    }, 503);
+  }
+  let filePath = path.normalize(path.join(FRONTEND_DIST_DIR, pathname));
+  if (!filePath.startsWith(FRONTEND_DIST_DIR)) return sendJson(res, { error: "Forbidden" }, 403);
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    return sendJson(res, { error: "Not found" }, 404);
+    filePath = path.join(FRONTEND_DIST_DIR, "index.html");
   }
   const ext = path.extname(filePath).toLowerCase();
   const type = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
     ".json": "application/json; charset=utf-8"
   }[ext] || "application/octet-stream";
   res.writeHead(200, { "content-type": type });

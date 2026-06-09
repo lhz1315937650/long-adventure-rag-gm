@@ -1,5 +1,14 @@
 # 更新日志
 
+## Unreleased
+
+### 变更
+
+- 前端从原生 HTML/CSS/JavaScript 重构为 React + TypeScript + Vite。
+- 后端改为托管 `frontend/dist` 构建产物。
+- 新增 `npm run dev`，用于同时启动本地 API 和 Vite 开发服务器。
+- `npm run check` 增加 TypeScript 检查和前端生产构建。
+
 ## 0.1.0 - 2026-06-09
 
 首次公开版本。

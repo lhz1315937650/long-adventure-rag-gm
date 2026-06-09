@@ -4,8 +4,11 @@
   "description": "本地运行的 LangChain RAG 长期冒险小说 GM 系统",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node scripts/check-agent-contracts.js"
+    "dev": "node scripts/dev.js",
+    "build": "vite build --config frontend/vite.config.ts",
+    "serve": "node server.js",
+    "start": "npm run build && node server.js",
+    "check": "node --check server.js && node --check scripts/dev.js && node scripts/check-agent-contracts.js && tsc -p frontend/tsconfig.json --noEmit && npm run build"
   },
   "keywords": [
     "langchain",
@@ -27,9 +30,18 @@
   "dependencies": {
     "@langchain/core": "^1.0.6",
     "@langchain/openai": "^1.1.2",
-    "langchain": "^1.1.0"
+    "langchain": "^1.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
   }
 }

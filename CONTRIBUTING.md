@@ -16,6 +16,12 @@ npm start
 http://localhost:8787
 ```
 
+开发模式：
+
+```powershell
+npm run dev
+```
+
 ## 提交前检查
 
 请至少运行：
@@ -60,6 +66,6 @@ lore/
 当前项目尽量保持简单：
 
 - 原生 Node.js HTTP 服务。
-- 原生前端。
+- React + TypeScript + Vite 前端。
 - 不引入不必要的构建工具。
 - 优先保持本地可运行和易理解。

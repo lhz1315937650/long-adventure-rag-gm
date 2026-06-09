@@ -6,7 +6,7 @@
 
 ## 核心功能
 
-- 本地网页游玩：角色创建、剧情正文、状态栏、选项按钮、自定义行动输入。
+- React 前端网页：角色创建、剧情正文、状态栏、选项按钮、自定义行动输入。
 - LangChain 后端：使用 `RunnableSequence`、`Document`、文件会话历史和 JSON 输出解析。
 - 多 Agent 架构：显式定义 GM 主持、记忆整理、资料库管理员和自生长审计 Agent。
 - RAG 长期记忆：组合检索结构化状态、会话摘要、运行时事实记忆和项目资料库。
@@ -32,6 +32,19 @@ npm start
 ```text
 http://localhost:8787
 ```
+
+`npm start` 会先构建 React 前端，再启动本地 Node.js 后端。
+
+开发模式：
+
+```powershell
+npm run dev
+```
+
+开发模式会同时启动：
+
+- 后端 API：`http://localhost:8787`
+- React/Vite 前端：`http://127.0.0.1:5173`
 
 如果只想试用界面流程，可以在网页中选择 `本地演示模式`，不需要填写 API Key。
 
@@ -143,7 +156,8 @@ npm run check
 检查：
 
 - `server.js`
-- `public/app.js`
+- React/TypeScript 前端
+- Agent 契约
 
 ## 开发文档
 
