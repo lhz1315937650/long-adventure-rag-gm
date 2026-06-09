@@ -67,6 +67,16 @@ http://localhost:8787
 
 列出 `lore/` 资料库文档。
 
+## GET /api/agents
+
+返回当前 Agent 系统契约。
+
+包括：
+
+- `globalInvariants`
+- `agents`
+- `routing`
+
 ## POST /api/lore
 
 新增背景资料。

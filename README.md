@@ -8,6 +8,7 @@
 
 - 本地网页游玩：角色创建、剧情正文、状态栏、选项按钮、自定义行动输入。
 - LangChain 后端：使用 `RunnableSequence`、`Document`、文件会话历史和 JSON 输出解析。
+- 多 Agent 架构：显式定义 GM 主持、记忆整理、资料库管理员和自生长审计 Agent。
 - RAG 长期记忆：组合检索结构化状态、会话摘要、运行时事实记忆和项目资料库。
 - 项目资料库：`lore/` 保存世界观、规则、NPC、势力、历史和后续背景。
 - 自生长候选：审计提示词、规则和资料库，生成候选建议与补丁文本，不自动污染正式设定。
@@ -104,6 +105,23 @@ lore/000-world-core.md
 
 接受候选后，系统只会在 `data/growth/proposals/` 生成可读补丁文件，不会自动改写 `prompts/`、`data/rules.json` 或 `lore/`。
 
+## Agent 系统
+
+Agent 契约位于：
+
+```text
+agents/novel-gm-agents.json
+```
+
+当前包含：
+
+- GM 主持 Agent。
+- 记忆整理 Agent。
+- 资料库管理员 Agent。
+- 自生长审计 Agent。
+
+网页右侧会展示当前代理系统。后端在 GM 回合和自生长审计时会把对应 Agent 契约注入上下文。
+
 ## RAG 检索方式
 
 当前版本使用轻量本地检索：
@@ -131,6 +149,7 @@ npm run check
 
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 说明](docs/API.md)
+- [Agent 系统说明](docs/AGENTS.md)
 - [贡献指南](CONTRIBUTING.md)
 - [更新日志](CHANGELOG.md)
 

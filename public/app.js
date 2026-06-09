@@ -15,6 +15,7 @@ let sessionSummary = null;
 let loreCount = 0;
 let growthDue = false;
 let growthProposals = [];
+let agentContract = null;
 let selectedRaceId = null;
 let busy = false;
 
@@ -55,6 +56,7 @@ async function bootstrap() {
     sessionSummary = data.sessionSummary;
     loreCount = data.loreCount || 0;
     growthDue = Boolean(data.growthDue);
+    agentContract = data.agentContract || null;
     await loadGrowthProposals();
     selectedRaceId = rules.races[0]?.id;
     render();
@@ -238,6 +240,10 @@ function renderGame() {
           <button id="growth-analyze" class="ghost-btn">运行自生长审计</button>
           <div class="list section">${renderGrowthProposals()}</div>
         </section>
+        <section>
+          <h2>代理系统</h2>
+          <div class="list">${renderAgentCards()}</div>
+        </section>
       </aside>
     </section>
   `;
@@ -359,6 +365,18 @@ function renderGrowthProposals() {
           <button class="danger-btn" data-proposal-id="${escapeHtml(proposal.id)}" data-proposal-decision="rejected">拒绝</button>
         </div>
       ` : ""}
+    </article>
+  `).join("");
+}
+
+function renderAgentCards() {
+  const agents = agentContract?.agents || [];
+  if (!agents.length) return `<div class="mini-card muted">未加载代理契约</div>`;
+  return agents.map((agent) => `
+    <article class="mini-card">
+      <strong>${escapeHtml(agent.name)}</strong>
+      <p class="small">${escapeHtml(agent.role)}</p>
+      <p class="small">${escapeHtml((agent.responsibilities || []).slice(0, 3).join("；"))}</p>
     </article>
   `).join("");
 }

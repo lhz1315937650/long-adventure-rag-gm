@@ -24,6 +24,7 @@ const STATE_FILE = path.join(DATA_DIR, "state.json");
 const MEMORY_FILE = path.join(DATA_DIR, "memories.json");
 const RULES_FILE = path.join(DATA_DIR, "rules.json");
 const PROMPT_FILE = path.join(__dirname, "prompts", "gm-system.md");
+const AGENTS_FILE = path.join(__dirname, "agents", "novel-gm-agents.json");
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -39,9 +40,14 @@ const server = http.createServer(async (req, res) => {
         rules: readJson(RULES_FILE),
         memoryCount: readJson(MEMORY_FILE).length,
         loreCount: listLoreDocuments().length,
+        agentContract: readAgentContract(),
         growthDue: isGrowthAuditDue(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID)),
         sessionSummary: readSessionSummary(DEFAULT_SESSION_ID)
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/agents") {
+      return sendJson(res, { ok: true, contract: readAgentContract() });
     }
 
     if (req.method === "GET" && url.pathname === "/api/lore") {
@@ -60,6 +66,7 @@ const server = http.createServer(async (req, res) => {
         rules: readJson(RULES_FILE),
         memories: readJson(MEMORY_FILE),
         lore: listLoreDocuments(),
+        agentContract: readAgentContract(),
         growthProposals: listGrowthProposals()
       });
     }
@@ -193,6 +200,23 @@ function writeSessionSummary(sessionId, summary) {
   const { summaryFile, sessionDir } = getSessionPaths(sessionId);
   fs.mkdirSync(sessionDir, { recursive: true });
   writeJson(summaryFile, summary);
+}
+
+function readAgentContract() {
+  if (!fs.existsSync(AGENTS_FILE)) {
+    return {
+      version: "missing",
+      systemName: "未配置 Agent 系统",
+      globalInvariants: [],
+      agents: [],
+      routing: []
+    };
+  }
+  return readJson(AGENTS_FILE);
+}
+
+function getAgentById(id) {
+  return readAgentContract().agents.find((agent) => agent.id === id) || null;
 }
 
 function listLoreDocuments() {
@@ -623,6 +647,7 @@ function buildLangChainInput(state, action, memoryDocs, sessionSummary) {
     : "你是长期冒险小说 GM。";
 
   const userPrompt = JSON.stringify({
+    active_agent: getAgentById("gm-narrator"),
     task: "根据玩家行动运行下一轮 GM 回合。只反馈结果，不替玩家决定下一步。",
     player_action: action,
     compressed_session_memory: sessionSummary.summary || "暂无压缩会话记忆。",
@@ -1065,6 +1090,8 @@ function buildGrowthContext(sessionId) {
       content
     })),
     sessionSummary: readSessionSummary(sessionId),
+    agentContract: readAgentContract(),
+    activeAgent: getAgentById("growth-auditor"),
     proposalPolicy: {
       mode: "candidate_only",
       apply: "generate_patch_text_only",

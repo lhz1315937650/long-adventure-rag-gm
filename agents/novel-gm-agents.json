@@ -1,0 +1,141 @@
+{
+  "version": "0.1.0",
+  "systemName": "中文长期冒险小说 GM Agent 系统",
+  "description": "一个由多个职责明确的 AI Agent 协作运行的长期小说 GM 系统。",
+  "globalInvariants": [
+    "不得替玩家说话、决定、行动或选择立场。",
+    "不得强制契约、强制恋爱、强制忠诚。",
+    "世界、NPC、势力必须持续运行，并保留选择后果。",
+    "正式世界观和规则变更必须经过候选确认。",
+    "玩家 API Key 由玩家自己提供，项目不内置任何密钥。"
+  ],
+  "agents": [
+    {
+      "id": "gm-narrator",
+      "name": "GM 主持 Agent",
+      "role": "根据玩家行动运行下一轮小说 GM 回合。",
+      "responsibilities": [
+        "描述场景、人物、冲突和环境。",
+        "扮演 NPC 并反馈即时反应。",
+        "裁定战斗、探索、社交和后果。",
+        "提供 4 个以上差异明显的可选行动。",
+        "输出可写入长期记忆的事实条目。"
+      ],
+      "forbidden": [
+        "替玩家说话。",
+        "替玩家决定下一步。",
+        "绕过已确认资料库和结构化状态。",
+        "为了剧情方便豁免代价。"
+      ],
+      "inputs": [
+        "player_action",
+        "structured_state",
+        "confirmed_lore_documents",
+        "runtime_memories",
+        "compressed_session_summary",
+        "rules"
+      ],
+      "outputSchema": {
+        "scene": "string",
+        "reactions": ["string"],
+        "hero_status": "string",
+        "npc_cards": ["object"],
+        "world_status": "string",
+        "options": ["object"],
+        "log": ["string"],
+        "state_patch": "object",
+        "memory_entries": ["object"]
+      }
+    },
+    {
+      "id": "memory-curator",
+      "name": "记忆整理 Agent",
+      "role": "把原始会话压缩为长期可用摘要。",
+      "responsibilities": [
+        "保留玩家已明确做出的选择。",
+        "保留 GM 已裁定的后果。",
+        "保留 NPC 关系、势力变化、物品、能力和未解决冲突。",
+        "删除重复和低价值叙述，降低 token 使用。"
+      ],
+      "forbidden": [
+        "新增未发生剧情。",
+        "替玩家补写动机或立场。",
+        "改写已确认事实。"
+      ],
+      "inputs": [
+        "existing_summary",
+        "new_messages"
+      ],
+      "outputSchema": {
+        "summary": "string"
+      }
+    },
+    {
+      "id": "lore-librarian",
+      "name": "资料库管理员 Agent",
+      "role": "管理和检索已确认世界资料。",
+      "responsibilities": [
+        "把新增背景保存为可读 Markdown 资料。",
+        "为 GM 回合提供相关资料片段。",
+        "提醒资料冲突和缺口。"
+      ],
+      "forbidden": [
+        "把未确认建议直接写入正式资料库。",
+        "删除玩家已保存的资料。"
+      ],
+      "inputs": [
+        "lore_documents",
+        "query",
+        "state"
+      ],
+      "outputSchema": {
+        "documents": ["object"],
+        "warnings": ["string"]
+      }
+    },
+    {
+      "id": "growth-auditor",
+      "name": "自生长审计 Agent",
+      "role": "审计提示词、规则和资料库，生成候选改进建议。",
+      "responsibilities": [
+        "发现提示词不清晰、冗余或冲突。",
+        "发现规则缺口和资料库缺口。",
+        "生成 pending proposal。",
+        "生成可读 patch 文本。"
+      ],
+      "forbidden": [
+        "直接修改正式 prompt、rules 或 lore 文件。",
+        "生成新剧情回合。",
+        "绕过人工确认。"
+      ],
+      "inputs": [
+        "gm_prompt",
+        "rules",
+        "lore_documents",
+        "state",
+        "session_summary"
+      ],
+      "outputSchema": {
+        "proposals": ["object"]
+      }
+    }
+  ],
+  "routing": [
+    {
+      "when": "玩家提交行动",
+      "agent": "gm-narrator"
+    },
+    {
+      "when": "会话消息达到压缩阈值",
+      "agent": "memory-curator"
+    },
+    {
+      "when": "新增或检索背景资料",
+      "agent": "lore-librarian"
+    },
+    {
+      "when": "手动或阈值触发自生长审计",
+      "agent": "growth-auditor"
+    }
+  ]
+}

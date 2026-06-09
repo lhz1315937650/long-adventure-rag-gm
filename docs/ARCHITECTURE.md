@@ -9,6 +9,7 @@
 - 前端：原生 HTML/CSS/JavaScript，负责角色创建、剧情展示、选项按钮、自定义行动、资料库追加和自生长候选管理。
 - 后端：Node.js 原生 HTTP 服务，负责静态文件、状态持久化、RAG 上下文组装、LangChain 调用和文件读写。
 - LangChain：用于模型调用、消息历史、文档包装、Runnable 链和 JSON 输出解析。
+- Agent 契约：`agents/novel-gm-agents.json` 显式定义各 Agent 的职责、输入、输出和禁止行为。
 - 存储：使用本地 JSON 与 Markdown 文件，不依赖数据库。
 
 ## 数据层
@@ -42,6 +43,17 @@ data/growth/proposals/
 - 项目资料库文档：`lore/**/*.md`。
 
 检索结果会包装为 LangChain `Document`，再交给 GM 链。
+
+## Agent 层
+
+项目包含四类核心 Agent：
+
+- GM 主持 Agent：运行玩家行动后的下一轮回合。
+- 记忆整理 Agent：压缩原始会话为长期摘要。
+- 资料库管理员 Agent：管理和检索 `lore/` 资料。
+- 自生长审计 Agent：生成提示词、规则和资料库改进候选。
+
+后端会在相关链路中注入对应 Agent 契约，让模型按明确职责工作。
 
 ## 会话记忆
 
