@@ -15,7 +15,10 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 8787);
 const DATA_DIR = path.join(__dirname, "data");
 const PUBLIC_DIR = path.join(__dirname, "public");
+const LORE_DIR = path.join(__dirname, "lore");
 const SESSIONS_DIR = path.join(DATA_DIR, "sessions");
+const GROWTH_DIR = path.join(DATA_DIR, "growth");
+const PROPOSALS_DIR = path.join(GROWTH_DIR, "proposals");
 const DEFAULT_SESSION_ID = "default";
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const MEMORY_FILE = path.join(DATA_DIR, "memories.json");
@@ -35,15 +38,29 @@ const server = http.createServer(async (req, res) => {
         state: readJson(STATE_FILE),
         rules: readJson(RULES_FILE),
         memoryCount: readJson(MEMORY_FILE).length,
+        loreCount: listLoreDocuments().length,
+        growthDue: isGrowthAuditDue(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID)),
         sessionSummary: readSessionSummary(DEFAULT_SESSION_ID)
       });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/lore") {
+      return sendJson(res, { ok: true, documents: listLoreDocuments() });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/lore") {
+      const payload = await readBody(req);
+      const document = createLoreDocument(payload);
+      return sendJson(res, { ok: true, document });
     }
 
     if (req.method === "GET" && url.pathname === "/api/export") {
       return sendJson(res, {
         state: readJson(STATE_FILE),
         rules: readJson(RULES_FILE),
-        memories: readJson(MEMORY_FILE)
+        memories: readJson(MEMORY_FILE),
+        lore: listLoreDocuments(),
+        growthProposals: listGrowthProposals()
       });
     }
 
@@ -56,6 +73,23 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/turn") {
       const payload = await readBody(req);
       const result = await runTurn(payload);
+      return sendJson(res, result);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/growth/analyze") {
+      const payload = await readBody(req);
+      const result = await analyzeGrowth(payload);
+      return sendJson(res, result);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/growth/proposals") {
+      return sendJson(res, { ok: true, proposals: listGrowthProposals() });
+    }
+
+    const proposalDecisionMatch = url.pathname.match(/^\/api\/growth\/proposals\/([^/]+)\/decision$/);
+    if (req.method === "POST" && proposalDecisionMatch) {
+      const payload = await readBody(req);
+      const result = decideGrowthProposal(proposalDecisionMatch[1], payload);
       return sendJson(res, result);
     }
 
@@ -84,7 +118,9 @@ server.listen(PORT, () => {
 
 function ensureProjectFiles() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(LORE_DIR, { recursive: true });
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
   fs.mkdirSync(path.join(__dirname, "prompts"), { recursive: true });
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
@@ -157,6 +193,151 @@ function writeSessionSummary(sessionId, summary) {
   const { summaryFile, sessionDir } = getSessionPaths(sessionId);
   fs.mkdirSync(sessionDir, { recursive: true });
   writeJson(summaryFile, summary);
+}
+
+function listLoreDocuments() {
+  fs.mkdirSync(LORE_DIR, { recursive: true });
+  return walkFiles(LORE_DIR)
+    .filter((file) => file.toLowerCase().endsWith(".md"))
+    .map((file) => {
+      const content = fs.readFileSync(file, "utf8");
+      const relativePath = path.relative(__dirname, file).replaceAll("\\", "/");
+      return {
+        id: relativePath,
+        title: extractMarkdownTitle(content) || path.basename(file, ".md"),
+        path: relativePath,
+        tags: extractMarkdownTags(content),
+        updatedAt: fs.statSync(file).mtime.toISOString(),
+        content
+      };
+    })
+    .sort((a, b) => a.path.localeCompare(b.path, "zh-Hans-CN"));
+}
+
+function createLoreDocument(payload) {
+  const title = String(payload.title || "").trim();
+  const content = String(payload.content || "").trim();
+  const tags = Array.isArray(payload.tags)
+    ? payload.tags.map((tag) => String(tag).trim()).filter(Boolean)
+    : String(payload.tags || "").split(/[,，\s]+/).map((tag) => tag.trim()).filter(Boolean);
+
+  if (!title) throw new Error("资料标题不能为空。");
+  if (!content) throw new Error("资料内容不能为空。");
+
+  const date = new Date().toISOString().slice(0, 10);
+  const fileName = `${date}-${slugify(title)}.md`;
+  const filePath = uniqueFilePath(path.join(LORE_DIR, fileName));
+  const markdown = [
+    `# ${title}`,
+    "",
+    `标签：${tags.length ? tags.join("，") : "未分类"}`,
+    "",
+    content,
+    ""
+  ].join("\n");
+
+  fs.writeFileSync(filePath, markdown, "utf8");
+  return listLoreDocuments().find((doc) => doc.path === path.relative(__dirname, filePath).replaceAll("\\", "/"));
+}
+
+function extractMarkdownTitle(content) {
+  return content.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
+}
+
+function extractMarkdownTags(content) {
+  const match = content.match(/^标签[:：]\s*(.+)$/m);
+  if (!match) return [];
+  return match[1].split(/[，,\s]+/).map((tag) => tag.trim()).filter(Boolean);
+}
+
+function uniqueFilePath(filePath) {
+  if (!fs.existsSync(filePath)) return filePath;
+  const ext = path.extname(filePath);
+  const base = filePath.slice(0, -ext.length);
+  let index = 2;
+  while (fs.existsSync(`${base}-${index}${ext}`)) index += 1;
+  return `${base}-${index}${ext}`;
+}
+
+function walkFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(dir, entry.name);
+    return entry.isDirectory() ? walkFiles(fullPath) : [fullPath];
+  });
+}
+
+function listGrowthProposals() {
+  fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
+  return fs.readdirSync(PROPOSALS_DIR)
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => readJson(path.join(PROPOSALS_DIR, file)))
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+function saveGrowthProposal(proposal) {
+  fs.mkdirSync(PROPOSALS_DIR, { recursive: true });
+  const normalized = normalizeGrowthProposal(proposal);
+  writeJson(path.join(PROPOSALS_DIR, `${normalized.id}.json`), normalized);
+  return normalized;
+}
+
+function normalizeGrowthProposal(proposal) {
+  const typeAllowlist = new Set(["prompt_patch", "rules_patch", "lore_gap", "consistency_warning"]);
+  const id = proposal.id ? sanitizeSessionId(proposal.id) : crypto.randomUUID();
+  return {
+    id,
+    type: typeAllowlist.has(proposal.type) ? proposal.type : "consistency_warning",
+    title: String(proposal.title || "未命名自生长建议").slice(0, 120),
+    rationale: String(proposal.rationale || "未提供原因。").slice(0, 3000),
+    risk: String(proposal.risk || "medium").slice(0, 80),
+    target_files: Array.isArray(proposal.target_files) ? proposal.target_files.map(String) : [],
+    patch: String(proposal.patch || "").slice(0, 12000),
+    status: ["pending", "accepted", "rejected"].includes(proposal.status) ? proposal.status : "pending",
+    createdAt: proposal.createdAt || new Date().toISOString(),
+    decidedAt: proposal.decidedAt || null,
+    decisionNote: proposal.decisionNote || "",
+    patchFile: proposal.patchFile || null
+  };
+}
+
+function decideGrowthProposal(id, payload) {
+  const safeId = sanitizeSessionId(id);
+  const filePath = path.join(PROPOSALS_DIR, `${safeId}.json`);
+  if (!fs.existsSync(filePath)) throw new Error("找不到这条自生长候选。");
+
+  const decision = String(payload.decision || "").trim();
+  if (!["accepted", "rejected"].includes(decision)) throw new Error("decision 必须是 accepted 或 rejected。");
+
+  const proposal = readJson(filePath);
+  proposal.status = decision;
+  proposal.decidedAt = new Date().toISOString();
+  proposal.decisionNote = String(payload.note || "");
+
+  if (decision === "accepted") {
+    const patchPath = path.join(PROPOSALS_DIR, `${safeId}.patch.md`);
+    const patchText = [
+      `# 自生长补丁建议：${proposal.title}`,
+      "",
+      `状态：accepted`,
+      `类型：${proposal.type}`,
+      `目标文件：${(proposal.target_files || []).join("，") || "未指定"}`,
+      "",
+      "## 原因",
+      "",
+      proposal.rationale || "无",
+      "",
+      "## 补丁/建议内容",
+      "",
+      proposal.patch || "无",
+      ""
+    ].join("\n");
+    fs.writeFileSync(patchPath, patchText, "utf8");
+    proposal.patchFile = path.relative(__dirname, patchPath).replaceAll("\\", "/");
+  }
+
+  writeJson(filePath, normalizeGrowthProposal(proposal));
+  return { ok: true, proposal: readJson(filePath) };
 }
 
 function defaultState() {
@@ -383,7 +564,7 @@ async function runTurn(payload) {
   const sessionId = sanitizeSessionId(payload.sessionId || DEFAULT_SESSION_ID);
   const chatHistory = getChatHistory(sessionId);
   const sessionSummary = readSessionSummary(sessionId);
-  const memoryDocs = retrieveMemoryDocuments(action, state);
+  const memoryDocs = retrieveContextDocuments(action, state, sessionSummary);
   const chainInput = buildLangChainInput(state, action, memoryDocs, sessionSummary);
 
   const turnResult = provider.mode === "mock"
@@ -431,7 +612,8 @@ async function runTurn(payload) {
     ok: true,
     state,
     retrievedMemories: memoryDocs.map(documentToMemory),
-    sessionSummary: readSessionSummary(sessionId)
+    sessionSummary: readSessionSummary(sessionId),
+    growthDue: isGrowthAuditDue(state, readSessionSummary(sessionId))
   };
 }
 
@@ -670,6 +852,84 @@ function retrieveMemoryDocuments(action, state) {
     }));
 }
 
+function retrieveContextDocuments(action, state, sessionSummary) {
+  const runtimeDocuments = retrieveMemoryDocuments(action, state);
+  const loreDocuments = retrieveLoreDocuments(action, state);
+  const summaryDocument = new Document({
+    pageContent: sessionSummary?.summary || "暂无压缩会话记忆。",
+    metadata: {
+      id: "session-summary",
+      type: "session_summary",
+      tags: ["session", "summary"],
+      turn: state.turn || 0,
+      createdAt: sessionSummary?.updatedAt || null,
+      importance: 2
+    }
+  });
+  const stateDocument = new Document({
+    pageContent: JSON.stringify({
+      hero: state.hero,
+      world: state.world,
+      npcs: state.npcs,
+      factions: state.factions,
+      abilities: state.abilities,
+      inventory: state.inventory
+    }, null, 2),
+    metadata: {
+      id: "structured-state",
+      type: "structured_state",
+      tags: ["state", "hero", "world"],
+      turn: state.turn || 0,
+      createdAt: new Date().toISOString(),
+      importance: 3
+    }
+  });
+
+  return [
+    stateDocument,
+    summaryDocument,
+    ...runtimeDocuments,
+    ...loreDocuments
+  ].slice(0, 18);
+}
+
+function retrieveLoreDocuments(action, state) {
+  const query = [
+    action,
+    state.hero?.name,
+    state.hero?.race?.name,
+    state.world?.location,
+    ...(state.world?.active_events || []),
+    ...(state.npcs || []).map((npc) => npc.name),
+    ...(state.factions || []).map((faction) => faction.name)
+  ].filter(Boolean).join(" ");
+  const queryTokens = tokenize(query);
+
+  return listLoreDocuments()
+    .map((item) => {
+      const text = `${item.title} ${(item.tags || []).join(" ")} ${item.content}`;
+      const tokens = tokenize(text);
+      const overlap = [...tokens].filter((token) => queryTokens.has(token)).length;
+      const score = overlap + 0.25;
+      return { item, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(({ item, score }) => new Document({
+      pageContent: item.content,
+      metadata: {
+        id: item.path,
+        type: "lore",
+        tags: item.tags || [],
+        turn: null,
+        createdAt: item.updatedAt,
+        importance: 2,
+        score
+      }
+    }));
+}
+
 function formatDocuments(documents) {
   if (!documents.length) return "无相关长期事实记忆。";
   return documents.map((doc, index) => {
@@ -776,6 +1036,145 @@ async function invokeCustomJsonSummary(provider, existingSummary, pendingMessage
   if (!response.ok) return makeLocalSessionSummary(existingSummary, pendingMessages);
   const text = data.output || data.answer || data.text || data.message || data.content;
   return typeof text === "string" ? text.trim() : makeLocalSessionSummary(existingSummary, pendingMessages);
+}
+
+async function analyzeGrowth(payload) {
+  const provider = payload.provider || {};
+  const sessionId = sanitizeSessionId(payload.sessionId || DEFAULT_SESSION_ID);
+  const context = buildGrowthContext(sessionId);
+  const rawProposals = provider.mode === "mock"
+    ? makeLocalGrowthProposals(context)
+    : await invokeGrowthAnalyzeChain(provider, context);
+
+  const proposals = (Array.isArray(rawProposals) ? rawProposals : rawProposals.proposals || [])
+    .slice(0, 8)
+    .map((proposal) => saveGrowthProposal(proposal));
+
+  return { ok: true, proposals, growthDue: false };
+}
+
+function buildGrowthContext(sessionId) {
+  return {
+    state: readJson(STATE_FILE),
+    rules: readJson(RULES_FILE),
+    prompt: fs.existsSync(PROMPT_FILE) ? fs.readFileSync(PROMPT_FILE, "utf8") : "",
+    lore: listLoreDocuments().map(({ title, path: lorePath, tags, content }) => ({
+      title,
+      path: lorePath,
+      tags,
+      content
+    })),
+    sessionSummary: readSessionSummary(sessionId),
+    proposalPolicy: {
+      mode: "candidate_only",
+      apply: "generate_patch_text_only",
+      allowedTypes: ["prompt_patch", "rules_patch", "lore_gap", "consistency_warning"],
+      mustNot: ["不要生成新剧情回合", "不要替玩家做决定", "不要直接改正式文件"]
+    }
+  };
+}
+
+async function invokeGrowthAnalyzeChain(provider, context) {
+  if (!provider.apiKey) throw new Error("运行自生长审计需要玩家自己的智能体 API Key，或切换到本地演示模式。");
+  if (provider.mode === "custom-json") return invokeCustomJsonGrowth(provider, context);
+
+  const model = new ChatOpenAI({
+    apiKey: provider.apiKey,
+    model: provider.model || "gpt-4.1-mini",
+    temperature: 0.3,
+    configuration: {
+      baseURL: normalizeOpenAIBaseURL(provider.baseUrl || "https://api.openai.com/v1")
+    }
+  });
+
+  const chain = RunnableSequence.from([
+    RunnableLambda.from((input) => [
+      new SystemMessage([
+        "你是中文 LangChain RAG 长期冒险 GM 项目的自生长审计器。",
+        "只分析提示词、规则和 lore 资料库，不生成剧情回合。",
+        "输出候选建议，必须等待用户确认，不能要求系统直接改正式文件。",
+        "必须返回单个 JSON 对象，不要 Markdown，不要代码块。"
+      ].join("\n")),
+      new HumanMessage(JSON.stringify({
+        task: "生成自生长候选建议。",
+        output_schema: {
+          proposals: [
+            {
+              type: "prompt_patch|rules_patch|lore_gap|consistency_warning",
+              title: "中文标题",
+              rationale: "为什么需要这个建议",
+              risk: "low|medium|high",
+              target_files: ["目标文件路径"],
+              patch: "可读补丁或建议文本；不得声称已经修改文件"
+            }
+          ]
+        },
+        context: input
+      }, null, 2))
+    ]),
+    model,
+    new StringOutputParser(),
+    tolerantJsonParser()
+  ]);
+
+  return chain.invoke(context);
+}
+
+async function invokeCustomJsonGrowth(provider, context) {
+  if (!provider.baseUrl) throw new Error("请填写自定义智能体 API 地址。");
+  const response = await fetch(provider.baseUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${provider.apiKey}`
+    },
+    body: JSON.stringify({
+      system: "你是中文 LangChain RAG 长期冒险 GM 项目的自生长审计器。返回 JSON：{proposals:[...]}。",
+      input: JSON.stringify(context, null, 2)
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || data.message || `自生长审计失败：${response.status}`);
+  return parseAgentContent(data.output || data.answer || data.text || data.message || data.content || data);
+}
+
+function makeLocalGrowthProposals(context) {
+  const proposals = [];
+  if (!context.lore.length) {
+    proposals.push({
+      type: "lore_gap",
+      title: "补充项目资料库初始世界观",
+      rationale: "当前 lore 资料库为空，GM 只能依赖系统提示词和规则文件，长期一致性不足。",
+      risk: "low",
+      target_files: ["lore/000-world-core.md"],
+      patch: "建议把已确认的异世界 GM 设定、角色创建规则、成长系统、NPC 关系、势力、战斗和长期记忆原则写入 lore/000-world-core.md。"
+    });
+  }
+  if (!String(context.prompt).includes("资料库")) {
+    proposals.push({
+      type: "prompt_patch",
+      title: "在 GM 提示词中明确优先遵守资料库",
+      rationale: "当前提示词没有显式说明 lore 资料库的优先级，模型可能忽略长期背景文档。",
+      risk: "medium",
+      target_files: ["prompts/gm-system.md"],
+      patch: "建议加入：当资料库、结构化状态和玩家行动存在冲突时，优先级为玩家当前行动 > 结构化状态 > 已确认资料库 > 压缩会话摘要 > 临场创作。"
+    });
+  }
+  proposals.push({
+    type: "consistency_warning",
+    title: "保持自生长候选人工确认",
+    rationale: "自生长系统如果直接改写规则或世界观，可能污染长期设定。",
+    risk: "low",
+    target_files: ["data/growth/proposals/"],
+    patch: "继续保持 pending/accepted/rejected 流程；accepted 只生成 patch 文本，不直接改正式文件。"
+  });
+  return { proposals };
+}
+
+function isGrowthAuditDue(state, sessionSummary) {
+  const turn = Number(state?.turn || 0);
+  const covered = Number(sessionSummary?.coveredMessageCount || 0);
+  return turn > 0 && (turn % 5 === 0 || covered >= 10);
 }
 
 function makeLocalSessionSummary(existingSummary, pendingMessages) {

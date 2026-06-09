@@ -10,6 +10,7 @@ node_modules/
 data/state.json
 data/memories.json
 data/sessions/
+data/growth/
 
 # Logs
 *.log
@@ -23,3 +24,4 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+.obsidian/

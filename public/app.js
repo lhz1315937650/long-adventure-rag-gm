@@ -12,6 +12,9 @@ const statNames = ["STR", "AGI", "VIT", "INT", "MEN", "MP"];
 let appState = null;
 let rules = null;
 let sessionSummary = null;
+let loreCount = 0;
+let growthDue = false;
+let growthProposals = [];
 let selectedRaceId = null;
 let busy = false;
 
@@ -40,6 +43,7 @@ resetBtn.addEventListener("click", async () => {
   const data = await request("/api/reset", { method: "POST", body: "{}" });
   appState = data.state;
   sessionSummary = null;
+  growthDue = false;
   render();
 });
 
@@ -49,6 +53,9 @@ async function bootstrap() {
     appState = data.state;
     rules = data.rules;
     sessionSummary = data.sessionSummary;
+    loreCount = data.loreCount || 0;
+    growthDue = Boolean(data.growthDue);
+    await loadGrowthProposals();
     selectedRaceId = rules.races[0]?.id;
     render();
   } catch (error) {
@@ -215,6 +222,22 @@ function renderGame() {
           <h2>会话记忆</h2>
           <div class="mini-card small">${escapeHtml(renderSessionSummary())}</div>
         </section>
+        <section>
+          <h2>资料库</h2>
+          <div class="mini-card small">已收录 ${loreCount} 份资料。</div>
+          <div class="custom-action section">
+            <input id="lore-title" placeholder="资料标题" />
+            <input id="lore-tags" placeholder="标签，用逗号分隔" />
+            <textarea id="lore-content" placeholder="追加新的故事背景、势力、历史或设定。"></textarea>
+            <button id="lore-submit" class="ghost-btn">保存资料</button>
+          </div>
+        </section>
+        <section>
+          <h2>自生长</h2>
+          ${growthDue ? `<div class="notice">当前存档已达到建议审计阈值。</div>` : ""}
+          <button id="growth-analyze" class="ghost-btn">运行自生长审计</button>
+          <div class="list section">${renderGrowthProposals()}</div>
+        </section>
       </aside>
     </section>
   `;
@@ -225,6 +248,11 @@ function renderGame() {
   document.querySelector("#custom-submit").addEventListener("click", () => {
     const value = document.querySelector("#custom-action").value.trim();
     if (value) runPlayerAction(value);
+  });
+  document.querySelector("#lore-submit").addEventListener("click", addLoreDocument);
+  document.querySelector("#growth-analyze").addEventListener("click", runGrowthAnalyze);
+  document.querySelectorAll("[data-proposal-decision]").forEach((button) => {
+    button.addEventListener("click", () => decideProposal(button.dataset.proposalId, button.dataset.proposalDecision));
   });
 }
 
@@ -317,6 +345,33 @@ function renderSessionSummary() {
   return `已压缩消息数：${sessionSummary.coveredMessageCount || 0}\n${sessionSummary.summary}`;
 }
 
+function renderGrowthProposals() {
+  if (!growthProposals.length) return `<div class="mini-card muted">暂无自生长候选</div>`;
+  return growthProposals.slice(0, 8).map((proposal) => `
+    <article class="mini-card">
+      <strong>${escapeHtml(proposal.title)}</strong>
+      <p class="small">类型：${escapeHtml(proposal.type)} · 状态：${escapeHtml(proposal.status)} · 风险：${escapeHtml(proposal.risk)}</p>
+      <p class="small">${escapeHtml(proposal.rationale)}</p>
+      ${proposal.patchFile ? `<p class="small">补丁文件：${escapeHtml(proposal.patchFile)}</p>` : ""}
+      ${proposal.status === "pending" ? `
+        <div class="form-actions section">
+          <button class="primary-btn" data-proposal-id="${escapeHtml(proposal.id)}" data-proposal-decision="accepted">接受</button>
+          <button class="danger-btn" data-proposal-id="${escapeHtml(proposal.id)}" data-proposal-decision="rejected">拒绝</button>
+        </div>
+      ` : ""}
+    </article>
+  `).join("");
+}
+
+async function loadGrowthProposals() {
+  try {
+    const data = await request("/api/growth/proposals");
+    growthProposals = data.proposals || [];
+  } catch {
+    growthProposals = [];
+  }
+}
+
 async function runPlayerAction(action) {
   try {
     setBusy(true);
@@ -326,6 +381,65 @@ async function runPlayerAction(action) {
     });
     appState = data.state;
     sessionSummary = data.sessionSummary;
+    growthDue = Boolean(data.growthDue);
+    await loadGrowthProposals();
+    render();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function addLoreDocument() {
+  const title = document.querySelector("#lore-title").value.trim();
+  const tags = document.querySelector("#lore-tags").value.trim();
+  const content = document.querySelector("#lore-content").value.trim();
+  if (!title || !content) {
+    showNotice("资料标题和内容不能为空。", true);
+    return;
+  }
+  try {
+    setBusy(true);
+    await request("/api/lore", {
+      method: "POST",
+      body: JSON.stringify({ title, tags, content })
+    });
+    loreCount += 1;
+    showNotice("资料已保存到项目资料库。");
+    render();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runGrowthAnalyze() {
+  try {
+    setBusy(true);
+    const data = await request("/api/growth/analyze", {
+      method: "POST",
+      body: JSON.stringify({ provider: getProviderConfig() })
+    });
+    growthProposals = data.proposals || [];
+    growthDue = false;
+    render();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function decideProposal(id, decision) {
+  try {
+    setBusy(true);
+    await request(`/api/growth/proposals/${encodeURIComponent(id)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision })
+    });
+    await loadGrowthProposals();
     render();
   } catch (error) {
     showNotice(error.message, true);

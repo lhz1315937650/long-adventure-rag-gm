@@ -1,11 +1,29 @@
 {
   "name": "long-adventure-rag-gm",
   "version": "0.1.0",
-  "private": true,
+  "description": "本地运行的 LangChain RAG 长期冒险小说 GM 系统",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
   },
+  "keywords": [
+    "langchain",
+    "rag",
+    "中文小说",
+    "互动小说",
+    "游戏主持人",
+    "长期记忆"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhz1315937650/long-adventure-rag-gm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lhz1315937650/long-adventure-rag-gm/issues"
+  },
+  "homepage": "https://github.com/lhz1315937650/long-adventure-rag-gm#readme",
   "dependencies": {
     "@langchain/core": "^1.0.6",
     "@langchain/openai": "^1.1.2",
