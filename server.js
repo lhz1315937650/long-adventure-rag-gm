@@ -660,11 +660,44 @@ function buildLangChainInput(state, action, memoryDocs, sessionSummary) {
 
   const userPrompt = JSON.stringify({
     active_agent: getAgentById("gm-narrator"),
-    task: "根据玩家行动运行下一轮 GM 回合。只反馈结果，不替玩家决定下一步。",
+    generation_mode: "real_agent_text_generation",
+    task: "你必须作为真实 AI 智能体运行下一轮长期冒险小说 GM 回合，而不是复用本地演示模板。只反馈玩家行动造成的世界结果，不替玩家决定下一步。",
+    role_contract: {
+      novelist: {
+        identity: "沉浸式异世界小说作家",
+        duties: [
+          "用中文小说正文描写环境、人物、事件、冲突和氛围。",
+          "让文字具有连续的叙事推进，而不是机械系统播报。",
+          "根据资料库和当前状态临场创作细节，但不得违背已确认事实。"
+        ]
+      },
+      system_gm: {
+        identity: "长期剧情系统 GM 与世界运行管理者",
+        duties: [
+          "裁定玩家行动的合理后果。",
+          "运行 NPC 独立反应、势力变化、时间地点变化和风险。",
+          "维护主角状态、NPC 关系、世界状态、剧情记录和长期记忆。",
+          "提供至少 4 个差异明显的下一步选项，并允许玩家自定义行动。"
+        ]
+      },
+      hard_limits: [
+        "绝不替玩家说话。",
+        "绝不替玩家决定立场、行动、承诺、购买、攻击、逃跑或契约。",
+        "绝不把选项写成已经发生的结果。",
+        "绝不因为主角身份豁免代价。"
+      ]
+    },
     player_action: action,
     compressed_session_memory: sessionSummary.summary || "暂无压缩会话记忆。",
     current_state: state,
     retrieved_memories: formatDocuments(memoryDocs),
+    narrative_requirements: [
+      "scene 必须是本轮新生成的中文小说正文，建议 500-1200 字，除非事件很短。",
+      "scene 要承接 player_action，明确写出世界、NPC、环境和冲突如何响应。",
+      "reactions 展示关键角色心理和态度变化，但不要泄露玩家无法合理知道的秘密。",
+      "log 只记录本轮事实、线索、关系变化和世界变化，供长期记忆使用。",
+      "state_patch 只写确实发生变化的结构化状态，不要大面积重写无关状态。"
+    ],
     required_output: {
       scene: "string，场景正文",
       reactions: ["string，即时反应，展示关键角色心理活动"],
@@ -706,7 +739,7 @@ function buildLangChainInput(state, action, memoryDocs, sessionSummary) {
 }
 
 async function invokeGmChain(provider, chainInput) {
-  if (!provider.apiKey) throw new Error("请先填写玩家自己的智能体 API Key，或切换到本地演示模式。");
+  if (!provider.apiKey) throw new Error("真实智能体生成需要填写玩家自己的 API Key。本地演示模式只用于测试界面流程，不是真正 AI 文本生成。");
 
   if (provider.mode === "custom-json") {
     return createCustomJsonAgentChain(provider).invoke(chainInput);

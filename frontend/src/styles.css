@@ -423,6 +423,13 @@ main {
   margin: 14px 0;
 }
 
+.notice.compact {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .error {
   border-color: #e0a090;
   background: #fff1ed;

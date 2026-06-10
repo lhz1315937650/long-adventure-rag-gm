@@ -188,9 +188,9 @@ function ProviderPanel({
       <div className="field">
         <label htmlFor="provider-mode">智能体模式</label>
         <select id="provider-mode" value={provider.mode} onChange={(event) => update({ mode: event.target.value as StoredProviderConfig["mode"] })}>
-          <option value="openai-compatible">OpenAI 兼容接口</option>
-          <option value="custom-json">自定义 Agent JSON</option>
-          <option value="mock">本地演示模式</option>
+          <option value="openai-compatible">真实智能体生成 / OpenAI 兼容</option>
+          <option value="custom-json">真实智能体生成 / 自定义 Agent JSON</option>
+          <option value="mock">本地演示模式（非 AI 生成）</option>
         </select>
       </div>
       <div className="field">
@@ -209,6 +209,11 @@ function ProviderPanel({
         <input type="checkbox" checked={provider.saveKey} onChange={(event) => update({ saveKey: event.target.checked })} />
         <span>保存在此浏览器</span>
       </label>
+      {provider.mode === "mock" ? (
+        <div className="notice compact">当前是本地演示模式，只用于测试界面流程；真正小说 GM 生成需要选择真实智能体模式并填写玩家自己的 API Key。</div>
+      ) : (
+        <div className="notice compact">当前会把玩家行动、RAG 资料、状态和记忆发送给你配置的智能体，由智能体扮演小说作家与系统 GM 生成下一轮。</div>
+      )}
     </section>
   );
 }

@@ -8,9 +8,9 @@ export interface StoredProviderConfig extends ProviderConfig {
 
 export function loadProviderSettings(): StoredProviderConfig {
   const fallback: StoredProviderConfig = {
-    mode: "mock",
-    baseUrl: "",
-    model: "",
+    mode: "openai-compatible",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
     apiKey: "",
     saveKey: false
   };
