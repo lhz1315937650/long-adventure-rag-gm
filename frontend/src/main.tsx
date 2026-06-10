@@ -9,7 +9,8 @@ import {
   getBootstrap,
   getGrowthProposals,
   resetGame,
-  runTurn
+  runTurn,
+  testProviderConnection
 } from "./api";
 import { loadProviderSettings, saveProviderSettings, type StoredProviderConfig } from "./providerSettings";
 import type {
@@ -38,6 +39,7 @@ function App() {
   const [provider, setProvider] = useState<StoredProviderConfig>(() => loadProviderSettings());
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyMessage, setBusyMessage] = useState("");
 
   useEffect(() => {
     void bootstrap();
@@ -96,15 +98,26 @@ function App() {
     await refreshGrowthProposals();
   }
 
-  async function withBusy(task: () => Promise<void>) {
+  async function withBusy(task: () => Promise<void>, message = "正在处理...") {
     try {
+      setBusyMessage(message);
       setBusy(true);
       await task();
     } catch (error) {
       showNotice(errorMessage(error), true);
     } finally {
       setBusy(false);
+      setBusyMessage("");
     }
+  }
+
+  function validateRealProvider() {
+    const message = providerIssue(provider);
+    if (message) {
+      showNotice(message, true);
+      return false;
+    }
+    return true;
   }
 
   const worldLine = useMemo(() => {
@@ -125,8 +138,17 @@ function App() {
         </div>
       </header>
 
-      <ProviderPanel provider={provider} onChange={setProvider} />
+      <ProviderPanel
+        provider={provider}
+        busy={busy}
+        onChange={setProvider}
+        onTest={() => withBusy(async () => {
+          const result = await testProviderConnection(provider);
+          showNotice(result.sample ? `${result.message} ${result.sample}` : result.message);
+        }, "正在测试智能体连接...")}
+      />
       {notice ? <div className={`notice ${notice.error ? "error" : ""}`}>{notice.text}</div> : null}
+      {busy ? <div className="busy-banner">{busyMessage || "正在处理..."}</div> : null}
 
       <main>
         {!state || !rules ? (
@@ -137,7 +159,7 @@ function App() {
             onCreate={(payload) => withBusy(async () => {
               const data = await createCharacter(payload);
               setState(data.state);
-            })}
+            }, "正在创建角色...")}
           />
         ) : (
           <GameView
@@ -147,27 +169,30 @@ function App() {
             growthDue={growthDue}
             growthProposals={growthProposals}
             agentContract={agentContract}
+            busy={busy}
             onAction={(action) => withBusy(async () => {
+              if (!validateRealProvider()) return;
               const data = await runTurn(action, provider);
               setState(data.state);
               setSessionSummary(data.sessionSummary);
               setGrowthDue(Boolean(data.growthDue));
               await refreshGrowthProposals();
-            })}
+            }, provider.mode === "mock" ? "正在运行本地演示回合..." : "智能体正在生成下一轮剧情...")}
             onAddLore={(payload) => withBusy(async () => {
               await addLore(payload);
               setLoreCount((count) => count + 1);
               showNotice("资料已保存到项目资料库。");
-            })}
+            }, "正在保存资料...")}
             onAnalyzeGrowth={() => withBusy(async () => {
+              if (!validateRealProvider()) return;
               const data = await analyzeGrowth(provider);
               setGrowthProposals(data.proposals || []);
               setGrowthDue(false);
-            })}
+            }, "智能体正在进行自生长审计...")}
             onDecideProposal={(id, decision) => withBusy(async () => {
               await decideGrowthProposal(id, decision);
               await refreshGrowthProposals();
-            })}
+            }, "正在更新候选状态...")}
           />
         )}
       </main>
@@ -177,12 +202,19 @@ function App() {
 
 function ProviderPanel({
   provider,
-  onChange
+  busy,
+  onChange,
+  onTest
 }: {
   provider: StoredProviderConfig;
+  busy: boolean;
   onChange: (provider: StoredProviderConfig) => void;
+  onTest: () => void;
 }) {
   const update = (patch: Partial<StoredProviderConfig>) => onChange({ ...provider, ...patch });
+  const issue = providerIssue(provider);
+  const statusText = provider.mode === "mock" ? "本地演示" : issue ? "需要配置" : "真实生成就绪";
+  const statusClass = provider.mode === "mock" || issue ? "warning" : "ready";
   return (
     <section className="settings-panel">
       <div className="field">
@@ -205,10 +237,14 @@ function ProviderPanel({
         <label htmlFor="api-key">玩家 API Key</label>
         <input id="api-key" type="password" value={provider.apiKey} onChange={(event) => update({ apiKey: event.target.value })} autoComplete="off" placeholder="只发送给本地后端，不写入服务器文件" />
       </div>
-      <label className="checkline">
-        <input type="checkbox" checked={provider.saveKey} onChange={(event) => update({ saveKey: event.target.checked })} />
-        <span>保存在此浏览器</span>
-      </label>
+      <div className="provider-actions">
+        <span className={`status-pill ${statusClass}`}>{statusText}</span>
+        <button className="ghost-btn" type="button" disabled={busy || Boolean(issue && provider.mode !== "mock")} onClick={onTest}>测试智能体</button>
+        <label className="checkline">
+          <input type="checkbox" checked={provider.saveKey} onChange={(event) => update({ saveKey: event.target.checked })} />
+          <span>保存在此浏览器</span>
+        </label>
+      </div>
       {provider.mode === "mock" ? (
         <div className="notice compact">当前是本地演示模式，只用于测试界面流程；真正小说 GM 生成需要选择真实智能体模式并填写玩家自己的 API Key。</div>
       ) : (
@@ -227,6 +263,7 @@ function CharacterCreation({ rules, onCreate }: { rules: Rules; onCreate: (paylo
   const race = rules.races.find((item) => item.id === selectedRaceId) || rules.races[0];
   const used = Object.values(stats).reduce((sum, value) => sum + value, 0);
   const remaining = race.initial_points - used;
+  const canCreate = Boolean(name.trim()) && remaining === 0;
 
   function randomAllocate() {
     const next = Object.fromEntries(statNames.map((stat) => [stat, 0]));
@@ -308,8 +345,9 @@ function CharacterCreation({ rules, onCreate }: { rules: Rules; onCreate: (paylo
             </select>
           </div>
           <div className="form-actions section">
-            <button className="primary-btn" onClick={() => onCreate({ name, raceId: selectedRaceId, stats, mainTalentId, subTalentId })}>创建角色</button>
+            <button className="primary-btn" disabled={!canCreate} onClick={() => onCreate({ name: name.trim(), raceId: selectedRaceId, stats, mainTalentId, subTalentId })}>创建角色</button>
           </div>
+          {!canCreate ? <div className="notice compact">请输入角色名，并把剩余属性点分配到 0 后再创建。</div> : null}
         </div>
       </div>
     </section>
@@ -337,6 +375,7 @@ function GameView({
   growthDue,
   growthProposals,
   agentContract,
+  busy,
   onAction,
   onAddLore,
   onAnalyzeGrowth,
@@ -348,6 +387,7 @@ function GameView({
   growthDue: boolean;
   growthProposals: GrowthProposal[];
   agentContract: AgentContract | null;
+  busy: boolean;
   onAction: (action: string) => void;
   onAddLore: (payload: { title: string; tags: string; content: string }) => void;
   onAnalyzeGrowth: () => void;
@@ -380,13 +420,13 @@ function GameView({
           <div className="section">
             <h3>可选行动</h3>
             <div className="option-grid">
-              {(last.options || []).map((option) => <OptionButton key={option.id} option={option} onAction={onAction} />)}
+              {(last.options || []).map((option) => <OptionButton key={option.id} option={option} disabled={busy} onAction={onAction} />)}
             </div>
           </div>
           <div className="section custom-action">
             <h3>自定义行动</h3>
             <textarea value={customAction} onChange={(event) => setCustomAction(event.target.value)} placeholder="输入玩家自己的行动。GM 只裁定后果，不替玩家决定。" />
-            <button className="primary-btn" onClick={() => {
+            <button className="primary-btn" disabled={busy || !customAction.trim()} onClick={() => {
               const value = customAction.trim();
               if (value) {
                 onAction(value);
@@ -492,10 +532,10 @@ function Inventory({ state }: { state: GameState }) {
   );
 }
 
-function OptionButton({ option, onAction }: { option: TurnOption; onAction: (action: string) => void }) {
+function OptionButton({ option, disabled, onAction }: { option: TurnOption; disabled?: boolean; onAction: (action: string) => void }) {
   const action = `选择 ${option.id}：${option.title}。${option.description}`;
   return (
-    <button className="option-btn" onClick={() => onAction(action)}>
+    <button className="option-btn" disabled={disabled} onClick={() => onAction(action)}>
       <strong>{option.id}. {option.title}</strong>
       <span>{option.description}</span>
     </button>
@@ -627,6 +667,13 @@ function AgentPanel({ agentContract }: { agentContract: AgentContract | null }) 
 function renderSessionSummary(summary: SessionSummary | null) {
   if (!summary?.summary) return "暂无压缩会话记忆。";
   return `已压缩消息数：${summary.coveredMessageCount || 0}\n${summary.summary}`;
+}
+
+function providerIssue(provider: StoredProviderConfig) {
+  if (provider.mode === "mock") return "";
+  if (!provider.apiKey.trim()) return "真实智能体生成需要先填写玩家自己的 API Key。";
+  if (provider.mode === "custom-json" && !provider.baseUrl.trim()) return "自定义 Agent JSON 模式需要填写 Agent API 地址。";
+  return "";
 }
 
 function errorMessage(error: unknown) {

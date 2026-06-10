@@ -46,6 +46,13 @@ export function runTurn(action: string, provider: ProviderConfig) {
   });
 }
 
+export function testProviderConnection(provider: ProviderConfig) {
+  return request<{ ok: true; message: string; sample?: string }>("/api/provider/test", {
+    method: "POST",
+    body: JSON.stringify({ provider })
+  });
+}
+
 export function addLore(payload: { title: string; tags: string; content: string }) {
   return request<{ ok: true }>("/api/lore", {
     method: "POST",

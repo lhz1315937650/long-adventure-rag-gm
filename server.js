@@ -83,6 +83,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, result);
     }
 
+    if (req.method === "POST" && url.pathname === "/api/provider/test") {
+      const payload = await readBody(req);
+      const result = await testProviderConnection(payload.provider || {});
+      return sendJson(res, result);
+    }
+
     if (req.method === "POST" && url.pathname === "/api/growth/analyze") {
       const payload = await readBody(req);
       const result = await analyzeGrowth(payload);
@@ -746,6 +752,59 @@ async function invokeGmChain(provider, chainInput) {
   }
 
   return createOpenAICompatibleGmChain(provider).invoke(chainInput);
+}
+
+async function testProviderConnection(provider) {
+  if (provider.mode === "mock") {
+    return {
+      ok: true,
+      message: "本地演示模式可用，但它不是 AI 文本生成。"
+    };
+  }
+
+  if (!provider.apiKey) throw new Error("请先填写玩家自己的 API Key。");
+
+  if (provider.mode === "custom-json") {
+    if (!provider.baseUrl) throw new Error("请填写自定义 Agent API 地址。");
+    const response = await fetch(provider.baseUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${provider.apiKey}`
+      },
+      body: JSON.stringify({
+        system: "你是连接测试助手。只返回一句简短中文。",
+        input: "请回复：连接成功。"
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || data.message || `智能体连接失败：${response.status}`);
+    return {
+      ok: true,
+      message: "自定义 Agent 已响应。",
+      sample: String(data.output || data.answer || data.text || data.message || data.content || JSON.stringify(data)).slice(0, 300)
+    };
+  }
+
+  const model = new ChatOpenAI({
+    apiKey: provider.apiKey,
+    model: provider.model || "gpt-4.1-mini",
+    temperature: 0,
+    configuration: {
+      baseURL: normalizeOpenAIBaseURL(provider.baseUrl || "https://api.openai.com/v1")
+    }
+  });
+
+  const result = await model.invoke([
+    new SystemMessage("你是连接测试助手。只返回一句简短中文。"),
+    new HumanMessage("请回复：连接成功。")
+  ]);
+
+  return {
+    ok: true,
+    message: "真实智能体连接成功。",
+    sample: String(result.content || "").slice(0, 300)
+  };
 }
 
 function createOpenAICompatibleGmChain(provider) {
