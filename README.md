@@ -60,6 +60,32 @@ API Key 默认只保存在当前网页输入框中，并随请求发送给本地
 
 如果勾选“保存在此浏览器”，Key 会保存到浏览器 `localStorage`。公开使用或共享电脑时不建议勾选。
 
+## 真实 GM 生成测试环境
+
+先启动本地服务：
+
+```powershell
+npm start
+```
+
+然后在另一个终端设置自己的 API Key，并运行一次真实 GM 回合测试：
+
+```powershell
+$env:GM_API_KEY="你的 API Key"
+$env:GM_MODEL="gpt-4.1-mini"
+npm run test:gm
+```
+
+可选环境变量：
+
+- `GM_TEST_URL`：本地服务地址，默认 `http://localhost:8787`。
+- `GM_MODE`：默认 `openai-compatible`，也可设为 `custom-json`。
+- `GM_BASE_URL`：OpenAI 兼容接口地址，默认 `https://api.openai.com/v1`。
+- `GM_MODEL`：模型或 Agent 名称。
+- `GM_TEST_ACTION`：本次测试提交给 GM 的玩家行动。
+
+测试脚本会读取当前本地存档。如果还没有角色，会自动创建一个测试角色；如果已有角色，会直接用当前进度提交一轮行动。API Key 只从环境变量读取，不会写入项目文件。
+
 ## 项目资料库
 
 `lore/` 是可版本管理的世界资料库，用来保存长期背景：
