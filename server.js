@@ -882,22 +882,19 @@ function parseAgentContent(content) {
 }
 
 function normalizeTurnResult(raw) {
-  const options = Array.isArray(raw.options) ? raw.options.slice(0, 8) : [];
-  while (options.length < 4) {
-    const id = String.fromCharCode(65 + options.length);
-    options.push({ id, title: "谨慎观察", description: "暂不贸然行动，继续收集周围信息。" });
-  }
+  validateTurnResultShape(raw);
+  const options = raw.options.slice(0, 8);
 
   return {
-    scene: String(raw.scene || "世界继续运行，但这一轮没有得到有效场景正文。"),
+    scene: String(raw.scene).trim(),
     reactions: toStringArray(raw.reactions),
     hero_status: String(raw.hero_status || ""),
     npc_cards: Array.isArray(raw.npc_cards) ? raw.npc_cards : [],
     world_status: String(raw.world_status || ""),
     options: options.map((item, index) => ({
       id: String(item.id || String.fromCharCode(65 + index)),
-      title: String(item.title || `选项 ${index + 1}`),
-      description: String(item.description || "")
+      title: String(item.title || `选项 ${index + 1}`).trim(),
+      description: String(item.description || "").trim()
     })),
     log: toStringArray(raw.log).length ? toStringArray(raw.log) : ["本轮已推进。"],
     state_patch: raw.state_patch && typeof raw.state_patch === "object" ? raw.state_patch : null,
@@ -905,6 +902,39 @@ function normalizeTurnResult(raw) {
   };
 }
 
+function validateTurnResultShape(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("智能体返回值必须是 JSON 对象。");
+  }
+
+  if (typeof raw.scene !== "string" || raw.scene.trim().length < 20) {
+    throw new Error("智能体返回的 scene 过短或缺失。请让模型输出本轮新生成的小说正文。");
+  }
+
+  if (!Array.isArray(raw.options) || raw.options.length < 4) {
+    throw new Error("智能体必须返回至少 4 个可选行动。");
+  }
+
+  for (const [index, option] of raw.options.entries()) {
+    if (!option || typeof option !== "object") {
+      throw new Error(`第 ${index + 1} 个选项不是对象。`);
+    }
+    if (!String(option.title || "").trim()) {
+      throw new Error(`第 ${index + 1} 个选项缺少 title。`);
+    }
+    if (!String(option.description || "").trim()) {
+      throw new Error(`第 ${index + 1} 个选项缺少 description。`);
+    }
+  }
+
+  if (raw.memory_entries && !Array.isArray(raw.memory_entries)) {
+    throw new Error("memory_entries 必须是数组。");
+  }
+
+  if (raw.npc_cards && !Array.isArray(raw.npc_cards)) {
+    throw new Error("npc_cards 必须是数组。");
+  }
+}
 
 function makeMockTurn(state, action, memoryDocs) {
   const day = state.world?.day || 1;
@@ -1258,7 +1288,7 @@ function retrieveContextDocuments(action, state, sessionSummary) {
     summaryDocument,
     ...runtimeDocuments,
     ...loreDocuments
-  ].slice(0, 18);
+  ].slice(0, 20);
 }
 
 function retrieveLoreDocuments(action, state) {
@@ -1273,29 +1303,130 @@ function retrieveLoreDocuments(action, state) {
   ].filter(Boolean).join(" ");
   const queryTokens = tokenize(query);
 
-  return listLoreDocuments()
-    .map((item) => {
-      const text = `${item.title} ${(item.tags || []).join(" ")} ${item.content}`;
+  const scoredChunks = listLoreDocuments()
+    .flatMap((item) => chunkLoreDocument(item))
+    .map((chunk) => {
+      const text = `${chunk.title} ${chunk.heading} ${(chunk.tags || []).join(" ")} ${chunk.content}`;
       const tokens = tokenize(text);
       const overlap = [...tokens].filter((token) => queryTokens.has(token)).length;
-      const score = overlap + 0.25;
-      return { item, score };
+      const titleTokens = tokenize(`${chunk.title} ${chunk.heading}`);
+      const titleBoost = [...titleTokens].filter((token) => queryTokens.has(token)).length * 2;
+      return { chunk, score: overlap + titleBoost };
     })
-    .filter(({ score }) => score > 0)
+    .filter(({ score }) => score >= 1)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
-    .map(({ item, score }) => new Document({
-      pageContent: item.content,
-      metadata: {
-        id: item.path,
-        type: "lore",
-        tags: item.tags || [],
-        turn: null,
-        createdAt: item.updatedAt,
-        importance: 2,
-        score
+    .slice(0, 10);
+
+  const fallbackChunks = scoredChunks.length ? scoredChunks : listLoreDocuments()
+    .filter((item) => item.path.includes("000-world-core"))
+    .flatMap((item) => chunkLoreDocument(item).slice(0, 3))
+    .map((chunk) => ({ chunk, score: 0.1 }));
+
+  return fallbackChunks.map(({ chunk, score }) => new Document({
+    pageContent: [
+      `# ${chunk.title}`,
+      chunk.heading ? `## ${chunk.heading}` : "",
+      chunk.content
+    ].filter(Boolean).join("\n\n"),
+    metadata: {
+      id: `${chunk.path}#${chunk.index}`,
+      type: "lore",
+      tags: chunk.tags || [],
+      turn: null,
+      createdAt: chunk.updatedAt,
+      importance: 2,
+      score,
+      sourcePath: chunk.path,
+      heading: chunk.heading
+    }
+  }));
+}
+
+function chunkLoreDocument(item) {
+  const sections = splitMarkdownSections(item.content || "");
+  const chunks = [];
+  let index = 0;
+
+  for (const section of sections) {
+    const parts = splitLongText(section.content, 1800);
+    for (const part of parts) {
+      const content = part.trim();
+      if (!content) continue;
+      chunks.push({
+        ...item,
+        index: index++,
+        heading: section.heading || item.title,
+        content
+      });
+    }
+  }
+
+  if (!chunks.length && item.content) {
+    for (const part of splitLongText(item.content, 1800)) {
+      chunks.push({
+        ...item,
+        index: index++,
+        heading: item.title,
+        content: part.trim()
+      });
+    }
+  }
+
+  return chunks;
+}
+
+function splitMarkdownSections(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const sections = [];
+  let heading = "";
+  let buffer = [];
+
+  for (const line of lines) {
+    const match = line.match(/^(#{1,4})\s+(.+)$/);
+    if (match && buffer.length) {
+      sections.push({ heading, content: buffer.join("\n").trim() });
+      heading = match[2].trim();
+      buffer = [];
+      continue;
+    }
+    if (match && !buffer.length) {
+      heading = match[2].trim();
+      continue;
+    }
+    buffer.push(line);
+  }
+
+  if (buffer.length) sections.push({ heading, content: buffer.join("\n").trim() });
+  return sections.filter((section) => section.content);
+}
+
+function splitLongText(text, maxLength) {
+  const clean = String(text || "").trim();
+  if (clean.length <= maxLength) return clean ? [clean] : [];
+
+  const paragraphs = clean.split(/\n{2,}/);
+  const chunks = [];
+  let current = "";
+
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+    if (current) chunks.push(current);
+    if (paragraph.length <= maxLength) {
+      current = paragraph;
+    } else {
+      for (let index = 0; index < paragraph.length; index += maxLength) {
+        chunks.push(paragraph.slice(index, index + maxLength));
       }
-    }));
+      current = "";
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 function formatDocuments(documents) {
@@ -1327,9 +1458,15 @@ async function maybeCompressSessionHistory(provider, sessionId = DEFAULT_SESSION
 
   if (pendingMessages.length < 6) return;
 
-  const summary = provider.mode === "mock"
-    ? makeLocalSessionSummary(currentSummary.summary, pendingMessages)
-    : await invokeSummaryChain(provider, currentSummary.summary, pendingMessages);
+  let summary;
+  try {
+    summary = provider.mode === "mock"
+      ? makeLocalSessionSummary(currentSummary.summary, pendingMessages)
+      : await invokeSummaryChain(provider, currentSummary.summary, pendingMessages);
+  } catch (error) {
+    console.warn("Session summary compression failed, falling back to local summary:", error.message || error);
+    summary = makeLocalSessionSummary(currentSummary.summary, pendingMessages);
+  }
 
   writeSessionSummary(sessionId, {
     sessionId,
