@@ -10,6 +10,8 @@ http://localhost:8787
 
 所有接口默认使用 JSON。
 
+接口的核心用途是支撑“玩家行动 -> LangChain RAG 上下文 -> AI 小说正文与 GM 裁定 -> 状态和记忆更新”这条主链路。React 前端只是调用这些接口的本地表现层。
+
 ## GET /api/bootstrap
 
 获取前端启动所需状态。

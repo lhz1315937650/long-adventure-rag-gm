@@ -2,15 +2,27 @@
 
 本文档说明“长期冒险 RAG GM”的核心结构，方便二次开发。
 
+项目定位：这是一个 **LangChain RAG AI 小说 GM 系统**。主功能是让智能体持续生成中文冒险小说，并作为系统 GM 裁定玩家选择后的世界反馈。React 只是本地表现层；资料库、自生长、导出和测试脚本都是为主链路服务的辅助能力。
+
 ## 总览
 
 项目采用本地优先架构：
 
-- 前端：React + TypeScript + Vite，负责角色创建、剧情展示、选项按钮、自定义行动、资料库追加和自生长候选管理。
-- 后端：Node.js 原生 HTTP 服务，负责托管 `frontend/dist`、状态持久化、RAG 上下文组装、LangChain 调用和文件读写。
-- LangChain：用于模型调用、消息历史、文档包装、Runnable 链和 JSON 输出解析。
+- 核心链路：玩家行动 -> RAG 上下文组装 -> LangChain GM 链 -> AI 小说正文与 GM 裁定 -> 状态和记忆落盘。
+- 后端：Node.js 原生 HTTP 服务，负责状态持久化、RAG 上下文组装、LangChain 调用、文件读写，并顺带托管 `frontend/dist`。
+- LangChain：用于模型调用、消息历史、文档包装、Runnable 链和 JSON 输出解析，是项目核心。
+- 前端：React + TypeScript + Vite，仅负责角色创建、剧情展示、选项按钮、自定义行动、资料库追加和自生长候选管理。
 - Agent 契约：`agents/novel-gm-agents.json` 显式定义各 Agent 的职责、输入、输出和禁止行为。
 - 存储：使用本地 JSON 与 Markdown 文件，不依赖数据库。
+
+## 主链路
+
+1. 玩家在网页点击选项或输入自定义行动。
+2. 后端读取当前世界状态、长期记忆、会话摘要和 `lore/` 资料库。
+3. 检索结果被包装为 LangChain `Document`，与系统提示词、Agent 契约、当前状态一起注入 GM 链。
+4. 智能体同时扮演小说作家和系统 GM，返回结构化 JSON。
+5. 后端解析 JSON，更新世界状态、NPC 卡、剧情记录、长期记忆和会话历史。
+6. React 前端只负责把新的小说正文、状态和选项展示给玩家。
 
 ## 前端构建
 

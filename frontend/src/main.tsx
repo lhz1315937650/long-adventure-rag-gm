@@ -129,7 +129,7 @@ function App() {
     <div className={`app ${busy ? "loading" : ""}`}>
       <header className="topbar">
         <div>
-          <h1>长期冒险 RAG GM</h1>
+          <h1>AI 小说 GM</h1>
           <p>{state ? worldLine : "本地世界运行中"}</p>
         </div>
         <div className="top-actions">
