@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   addLore,
@@ -349,7 +349,16 @@ function GameView({
   onDecideProposal: (id: string, decision: "accepted" | "rejected") => void;
 }) {
   const [customAction, setCustomAction] = useState("");
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
   const last = state.lastTurn || {};
+  const keepStreamInView = useCallback(() => {
+    streamEndRef.current?.scrollIntoView({ block: "end" });
+  }, []);
+
+  useEffect(() => {
+    keepStreamInView();
+  }, [state.turn]);
+
   if (!state.hero) return <div className="notice error">角色状态缺失，请重置后重新创建。</div>;
   return (
     <section className="game-layout">
@@ -359,25 +368,32 @@ function GameView({
         <Inventory state={state} />
       </aside>
       <section className="scene-panel">
-        <h2>场景正文</h2>
-        <TypewriterText text={last.scene || "等待 GM 回合。"} />
-        <InfoSection title="即时反应" items={last.reactions} />
-        <div className="section">
-          <h3>可选行动</h3>
-          <div className="option-grid">
-            {(last.options || []).map((option) => <OptionButton key={option.id} option={option} onAction={onAction} />)}
+        <div className="narrative-stream">
+          <h2>场景正文</h2>
+          <TypewriterText text={last.scene || "等待 GM 回合。"} onProgress={keepStreamInView} />
+          <InfoSection title="即时反应" items={last.reactions} />
+          <div className="section">
+            <h3>可选行动</h3>
+            <div className="option-grid">
+              {(last.options || []).map((option) => <OptionButton key={option.id} option={option} onAction={onAction} />)}
+            </div>
           </div>
-        </div>
-        <div className="section custom-action">
-          <h3>自定义行动</h3>
-          <textarea value={customAction} onChange={(event) => setCustomAction(event.target.value)} placeholder="输入玩家自己的行动。GM 只裁定后果，不替玩家决定。" />
-          <button className="primary-btn" onClick={() => {
-            const value = customAction.trim();
-            if (value) {
-              onAction(value);
-              setCustomAction("");
-            }
-          }}>提交行动</button>
+          <div className="section custom-action">
+            <h3>自定义行动</h3>
+            <textarea value={customAction} onChange={(event) => setCustomAction(event.target.value)} placeholder="输入玩家自己的行动。GM 只裁定后果，不替玩家决定。" />
+            <button className="primary-btn" onClick={() => {
+              const value = customAction.trim();
+              if (value) {
+                onAction(value);
+                setCustomAction("");
+              }
+            }}>提交行动</button>
+          </div>
+          <section className="section narrative-history">
+            <h2>剧情记录</h2>
+            <div className="history-list history-list-flow"><History state={state} chronological /></div>
+          </section>
+          <div ref={streamEndRef} />
         </div>
       </section>
       <aside className="right">
@@ -385,10 +401,6 @@ function GameView({
         <section>
           <h2>世界状态</h2>
           <div className="mini-card">{last.world_status || "暂无"}</div>
-        </section>
-        <section>
-          <h2>剧情记录</h2>
-          <div className="history-list"><History state={state} /></div>
         </section>
         <section>
           <h2>会话记忆</h2>
@@ -402,7 +414,7 @@ function GameView({
   );
 }
 
-function TypewriterText({ text }: { text: string }) {
+function TypewriterText({ text, onProgress }: { text: string; onProgress?: () => void }) {
   const [visible, setVisible] = useState("");
 
   useEffect(() => {
@@ -411,10 +423,11 @@ function TypewriterText({ text }: { text: string }) {
     const timer = window.setInterval(() => {
       index = Math.min(text.length, index + 3);
       setVisible(text.slice(0, index));
+      onProgress?.();
       if (index >= text.length) window.clearInterval(timer);
     }, 18);
     return () => window.clearInterval(timer);
-  }, [text]);
+  }, [text, onProgress]);
 
   return (
     <div className="scene-text" aria-live="polite">
@@ -514,8 +527,11 @@ function NpcPanel({ npcs }: { npcs: NpcCard[] }) {
   );
 }
 
-function History({ state }: { state: GameState }) {
-  const history = [...(state.history || [])].reverse().slice(0, 20);
+function History({ state, chronological = false }: { state: GameState; chronological?: boolean }) {
+  const entries = chronological
+    ? (state.history || []).slice(-40)
+    : [...(state.history || [])].reverse().slice(0, 20);
+  const history = entries;
   if (!history.length) return <div className="mini-card muted">暂无记录</div>;
   return history.map((entry) => (
     <div className="mini-card" key={`${entry.turn}-${entry.title}`}>

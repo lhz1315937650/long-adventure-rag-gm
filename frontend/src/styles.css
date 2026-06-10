@@ -244,6 +244,8 @@ main {
   grid-template-columns: 300px minmax(0, 1fr) 340px;
   gap: 0;
   overflow: hidden;
+  height: calc(100vh - 280px);
+  min-height: 680px;
 }
 
 .side,
@@ -252,6 +254,7 @@ main {
   display: grid;
   gap: 14px;
   align-content: start;
+  overflow: auto;
 }
 
 .side {
@@ -268,6 +271,13 @@ main {
   box-shadow: none;
   padding: 18px;
   background: #fffcf5;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.narrative-stream {
+  min-height: 100%;
+  padding-bottom: 22px;
 }
 
 .scene-text {
@@ -396,10 +406,12 @@ main {
 }
 
 .history-list {
-  max-height: 420px;
-  overflow: auto;
   display: grid;
   gap: 10px;
+}
+
+.history-list-flow .mini-card {
+  background: #fffaf0;
 }
 
 .notice {
@@ -427,6 +439,16 @@ main {
   .creation-form,
   .game-layout {
     grid-template-columns: 1fr;
+  }
+
+  .game-layout {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .scene-panel {
+    max-height: 72vh;
   }
 
   .creation-grid {
