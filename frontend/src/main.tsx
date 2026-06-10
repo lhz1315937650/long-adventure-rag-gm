@@ -223,6 +223,29 @@ function CharacterCreation({ rules, onCreate }: { rules: Rules; onCreate: (paylo
   const used = Object.values(stats).reduce((sum, value) => sum + value, 0);
   const remaining = race.initial_points - used;
 
+  function randomAllocate() {
+    const next = Object.fromEntries(statNames.map((stat) => [stat, 0]));
+    const weights = statNames.map((stat) => Math.max(0.1, race.growth[stat] || 1));
+    for (let point = 0; point < race.initial_points; point += 1) {
+      const total = weights.reduce((sum, value) => sum + value, 0);
+      let cursor = Math.random() * total;
+      let chosen = statNames[0];
+      for (let index = 0; index < statNames.length; index += 1) {
+        cursor -= weights[index];
+        if (cursor <= 0) {
+          chosen = statNames[index];
+          break;
+        }
+      }
+      next[chosen] += 1;
+    }
+    setStats(next);
+  }
+
+  function clearStats() {
+    setStats(Object.fromEntries(statNames.map((stat) => [stat, 0])));
+  }
+
   return (
     <section className="creation-layout">
       <div className="notice">先创建角色。GM 只提供种族框架和数值规则，不预设背景、立场或成长路线。</div>
@@ -239,11 +262,19 @@ function CharacterCreation({ rules, onCreate }: { rules: Rules; onCreate: (paylo
             <input id="hero-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="输入玩家角色名" />
           </div>
           <div className="section">
-            <div className="remaining" style={{ color: remaining === 0 ? "var(--accent-strong)" : "var(--rust)" }}>剩余属性点：{remaining}</div>
+            <div className="stat-toolbar">
+              <div className="remaining" style={{ color: remaining === 0 ? "var(--accent-strong)" : "var(--rust)" }}>剩余属性点：{remaining}</div>
+              <div className="form-actions">
+                <button className="ghost-btn" type="button" onClick={randomAllocate}>随机分配</button>
+                <button className="plain-btn" type="button" onClick={clearStats}>清空</button>
+              </div>
+            </div>
             <div className="stat-grid">
-              {statNames.map((stat) => (
+              {statNames.map((stat) => {
+                const info = rules.statDescriptions?.[stat];
+                return (
                 <label className="stat-input" key={stat}>
-                  <span>{stat}</span>
+                  <span>{stat} {info?.name ? `· ${info.name}` : ""}</span>
                   <input
                     type="number"
                     min={0}
@@ -251,8 +282,10 @@ function CharacterCreation({ rules, onCreate }: { rules: Rules; onCreate: (paylo
                     value={stats[stat] || 0}
                     onChange={(event) => setStats({ ...stats, [stat]: Math.max(0, Number.parseInt(event.target.value || "0", 10)) })}
                   />
+                  {info?.description ? <em>{info.description}</em> : null}
                 </label>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -286,6 +319,7 @@ function RaceCard({ race, selected, onSelect }: { race: Race; selected: boolean;
       <p className="small">初始属性点：{race.initial_points}</p>
       <p className="small">成长：{growth}</p>
       <p className="small">天赋：{race.talent.name}，{race.talent.description}</p>
+      {race.talent.effects?.length ? <p className="small">效果：{race.talent.effects.join("；")}</p> : null}
       <button className="plain-btn" onClick={onSelect}>{selected ? "已选择" : "选择"}</button>
     </article>
   );
@@ -326,7 +360,7 @@ function GameView({
       </aside>
       <section className="scene-panel">
         <h2>场景正文</h2>
-        <div className="scene-text">{last.scene || "等待 GM 回合。"}</div>
+        <TypewriterText text={last.scene || "等待 GM 回合。"} />
         <InfoSection title="即时反应" items={last.reactions} />
         <div className="section">
           <h3>可选行动</h3>
@@ -365,6 +399,28 @@ function GameView({
         <AgentPanel agentContract={agentContract} />
       </aside>
     </section>
+  );
+}
+
+function TypewriterText({ text }: { text: string }) {
+  const [visible, setVisible] = useState("");
+
+  useEffect(() => {
+    setVisible("");
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index = Math.min(text.length, index + 3);
+      setVisible(text.slice(0, index));
+      if (index >= text.length) window.clearInterval(timer);
+    }, 18);
+    return () => window.clearInterval(timer);
+  }, [text]);
+
+  return (
+    <div className="scene-text" aria-live="polite">
+      {visible}
+      {visible.length < text.length ? <span className="stream-cursor" aria-hidden="true" /> : null}
+    </div>
   );
 }
 

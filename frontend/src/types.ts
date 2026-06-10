@@ -15,6 +15,7 @@ export interface Race {
   talent: {
     name: string;
     description: string;
+    effects?: string[];
   };
 }
 
@@ -26,6 +27,7 @@ export interface Talent {
 
 export interface Rules {
   stats: string[];
+  statDescriptions?: Record<string, { name: string; description: string }>;
   races: Race[];
   mainTalents: Talent[];
   subTalents: Talent[];

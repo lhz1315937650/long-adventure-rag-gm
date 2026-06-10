@@ -405,6 +405,14 @@ function defaultState() {
 function defaultRules() {
   return {
     stats: ["STR", "AGI", "VIT", "INT", "MEN", "MP"],
+    statDescriptions: {
+      STR: { name: "力量", description: "影响近战攻击、负重、破坏障碍和力量对抗。" },
+      AGI: { name: "敏捷", description: "影响闪避、先手、潜行、攀爬、射击和反应速度。" },
+      VIT: { name: "体质", description: "影响生命力、抗打击、抗毒、耐力和伤势恢复。" },
+      INT: { name: "智力", description: "影响知识、推理、魔法理解、语言和复杂工具使用。" },
+      MEN: { name: "精神", description: "影响意志、感知、抗恐惧、契约稳定和精神魔法抵抗。" },
+      MP: { name: "魔力", description: "影响施法强度、魔力量、魔法感知和魔导器适配。" }
+    },
     level: {
       min: 1,
       max: 100,
@@ -427,7 +435,8 @@ function defaultRules() {
         growth: { STR: 1.2, AGI: 1, VIT: 1.1, INT: 1, MEN: 0.9, MP: 1 },
         talent: {
           name: "野性直觉",
-          description: "提升战斗预判、夜间感知和危险反应速度。"
+          description: "提升战斗预判、夜间感知和危险反应速度。",
+          effects: ["夜间与低光环境感知提升", "遭遇伏击时更容易提前察觉", "追踪气味、脚印和血迹时获得优势"]
         }
       },
       {
@@ -437,7 +446,8 @@ function defaultRules() {
         growth: { STR: 1, AGI: 1, VIT: 0.8, INT: 1.2, MEN: 1, MP: 1.3 },
         talent: {
           name: "自然共鸣",
-          description: "提升魔法亲和、环境恢复和魔力流动感知。"
+          description: "提升魔法亲和、环境恢复和魔力流动感知。",
+          effects: ["在森林、河流、草地等自然环境中恢复更快", "更容易察觉魔力流动和自然异常", "自然魔法与精灵遗迹互动获得优势"]
         }
       },
       {
@@ -447,7 +457,8 @@ function defaultRules() {
         growth: { STR: 1.1, AGI: 1.1, VIT: 1.1, INT: 1.1, MEN: 1.1, MP: 1.4 },
         talent: {
           name: "龙血觉醒",
-          description: "可成长龙化能力，获得魔力压制抗性和恢复加速。"
+          description: "可成长龙化能力，获得魔力压制抗性和恢复加速。",
+          effects: ["对威压、恐惧和魔力压制有额外抗性", "受伤后恢复速度略有提升", "后续可通过事件解锁龙化阶段"]
         }
       },
       {
@@ -457,7 +468,8 @@ function defaultRules() {
         growth: { STR: 1, AGI: 1, VIT: 1, INT: 1, MEN: 1, MP: 1 },
         talent: {
           name: "适应者",
-          description: "技能学习速度提升，装备兼容性最高。"
+          description: "技能学习速度提升，装备兼容性最高。",
+          effects: ["学习新技能和工具时更快上手", "跨职业训练惩罚更低", "更容易适应不同种族装备和战斗风格"]
         }
       },
       {
@@ -467,7 +479,8 @@ function defaultRules() {
         growth: { STR: 1, AGI: 1, VIT: 0.9, INT: 1, MEN: 1.2, MP: 1.5 },
         talent: {
           name: "深渊共鸣",
-          description: "黑暗魔法强化，情绪波动可转化为魔力。"
+          description: "黑暗魔法强化，情绪波动可转化为魔力。",
+          effects: ["黑暗、诅咒、深渊类魔法亲和提升", "强烈情绪可短暂转化为魔力爆发", "在魔域边缘更容易感知异常规则"]
         }
       }
     ],
@@ -800,42 +813,281 @@ function normalizeTurnResult(raw) {
   };
 }
 
-function makeMockTurn(state, action, memoryDocs, sessionSummary) {
+
+function makeMockTurn(state, action, memoryDocs) {
   const day = state.world?.day || 1;
-  const location = state.world?.location || "边境";
+  const turn = (state.turn || 0) + 1;
+  const hero = state.hero || { name: "玩家角色", level: 1, status: ["健康"] };
+  const intent = detectMockIntent(action);
+  const time = advanceMockTime(state.world?.time, turn);
+  const branch = buildMockBranch(intent, { state, action, memoryDocs, day, turn, hero, time });
+
   return {
-    scene: `你选择了：${action}。\n\n${location} 的空气仍在流动，远处的人声、车轮声和风声没有因为你的决定而停下。GM 会承认这次行动，但不会替你决定立场、语言或下一步。由于当前使用的是本地演示模式，这一轮只生成保守结果：你获得了更多可观察信息，世界事件继续推进。\n\n压缩会话记忆：${sessionSummary.summary}`,
-    reactions: [
-      "附近的陌生人注意到你的行动，但尚未判断你是否可信。",
-      "公会相关的传闻仍在扩散，边境的不安没有消失。"
-    ],
-    hero_status: `${state.hero.name}：Lv${state.hero.level}，${state.hero.status.join("，")}。`,
-    npc_cards: [],
-    world_status: `第 ${day} 日，${location}。已检索 ${memoryDocs.length} 条相关记忆。`,
-    options: [
-      { id: "A", title: "继续追问", description: "围绕刚才获得的信息向附近人物打听。" },
-      { id: "B", title: "保持距离观察", description: "不暴露意图，记录人物和环境变化。" },
-      { id: "C", title: "前往公会", description: "寻找正式委托和登记机会。" },
-      { id: "D", title: "离开人群", description: "转向道路或林地边缘，寻找实际痕迹。" }
-    ],
+    scene: branch.scene,
+    reactions: branch.reactions,
+    hero_status: hero.name + "，Lv" + hero.level + "，" + (hero.status || ["健康"]).join("；") + "。",
+    npc_cards: branch.npc_cards,
+    world_status: "第 " + day + " 日，" + branch.location + "，" + time + "。已检索 " + memoryDocs.length + " 条相关记忆。",
+    options: branch.options,
     log: [
-      "本地演示模式完成一轮推进。",
-      "没有替玩家做决定。",
-      "真实剧情建议配置玩家自己的智能体 API Key 后运行。"
+      "玩家行动：" + action,
+      branch.log,
+      "本地演示模式只裁定可观察后果，不替玩家决定立场、台词或下一步。"
     ],
     state_patch: {
       world: {
         day,
-        location,
-        time: state.world?.time || "傍晚"
+        location: branch.location,
+        time,
+        active_events: branch.active_events
       }
     },
     memory_entries: [
       {
         type: "plot",
-        tags: ["mock", "player-action"],
-        text: `玩家在演示模式下行动：${action}`
-      }
+        tags: ["mock", "player-action", intent],
+        text: "第 " + turn + " 轮，玩家选择“" + action + "”。结果：" + branch.log
+      },
+      ...branch.memory_entries
+    ]
+  };
+}
+
+function detectMockIntent(action) {
+  const text = String(action || "");
+  if (/公会|委托|登记|任务|悬赏/.test(text)) return "guild";
+  if (/驿站|老板|旅店|追问|打听|询问/.test(text)) return "inn";
+  if (/观察|距离|行人|记录|盯梢|暗中/.test(text)) return "observe";
+  if (/林|道路|踪迹|痕迹|离开人群|脚印|魔兽/.test(text)) return "trail";
+  if (/购买|装备|补给|市场|商会/.test(text)) return "supply";
+  return "cautious";
+}
+
+function advanceMockTime(current, turn) {
+  const order = ["清晨", "上午", "正午", "午后", "傍晚", "日暮", "入夜前", "夜色初临", "深夜前"];
+  const known = order.indexOf(current || "傍晚");
+  if (known >= 0) return order[Math.min(order.length - 1, known + 1)];
+  return order[Math.min(order.length - 1, 4 + Math.floor(turn / 2))];
+}
+
+function buildMockBranch(intent, context) {
+  const branches = {
+    guild: mockGuildBranch,
+    inn: mockInnBranch,
+    observe: mockObserveBranch,
+    trail: mockTrailBranch,
+    supply: mockSupplyBranch,
+    cautious: mockCautiousBranch
+  };
+  return (branches[intent] || mockCautiousBranch)(context);
+}
+
+function baseNpcCards() {
+  return [
+    {
+      id: "mira-guild-clerk",
+      name: "米拉",
+      appearance: "戴铜框眼镜的公会记录员，袖口沾着墨迹，腰间挂着一串任务牌钥匙。",
+      personality: "谨慎、重视手续，不喜欢空口承诺。",
+      goal: "在边境混乱扩大前筛出可靠的新手。",
+      weakness: "对伪造文书和贵族施压格外敏感。",
+      secret: "她私下在追查一批被调包的低阶委托。",
+      stance: "愿意观察玩家，但不会立刻信任。",
+      affinity: 0,
+      trust: 1,
+      relationship: "初识",
+      faction: "冒险者公会",
+      mental_state: "警惕但保持职业礼貌"
+    },
+    {
+      id: "hock-station-owner",
+      name: "霍克",
+      appearance: "肩背宽厚的驿站老板，右手旧伤让他倒酒时动作略慢。",
+      personality: "现实、护短，先看利益再谈善意。",
+      goal: "保住驿站生意，弄清失踪驮兽的去向。",
+      weakness: "害怕守备队把责任推给驿站。",
+      secret: "昨夜他听见林道方向传来像金属拖行的声音。",
+      stance: "对陌生冒险者保持试探。",
+      affinity: 0,
+      trust: 0,
+      relationship: "陌生人",
+      faction: "边境驿站",
+      mental_state: "焦躁，正在权衡是否透露更多"
+    }
+  ];
+}
+
+function mockGuildBranch({ action, memoryDocs, hero, time }) {
+  return {
+    location: "冒险者公会大厅",
+    active_events: ["边境旧林道出现异常魔兽痕迹", "低阶委托板被临时封走三张任务牌"],
+    scene: [
+      "你选择了：" + action,
+      "公会大厅比外面更亮，油灯挂在梁柱下，照出公告板上层层叠叠的羊皮纸。柜台后的记录员米拉抬起眼，先看你的手、靴子和随身物，再看你的脸。",
+      "她没有替你登记任何身份，也没有替你选择委托，只把一块空白木牌推到柜台边缘。低阶委托板右下角有三处明显的空缺，像是刚被人匆忙摘走。旁边两名搬运工压低声音谈到“旧林道”“失踪驮兽”和“守备队不让靠近”。",
+      "你现在获得了一个明确入口：公会愿意处理登记，但真正有价值的情报藏在被摘走的委托和大厅里互相回避的目光中。"
+    ].join("\n\n"),
+    reactions: [
+      "米拉判断你还没有公会记录，因此不会主动把危险委托交给你。",
+      "一名靠墙的老冒险者注意到你在看空缺任务牌，像是在评估你会不会贸然追问。",
+      "大厅里的低声议论没有停止，说明旧林道事件并非孤立传闻。"
+    ],
+    npc_cards: baseNpcCards().slice(0, 1),
+    options: [
+      { id: "A", title: "申请新手登记", description: "按公会手续登记身份，但不承诺接取任何委托。" },
+      { id: "B", title: "询问空缺任务牌", description: "向米拉打听被摘走的三张低阶委托。" },
+      { id: "C", title: "旁听冒险者谈话", description: "保持距离，寻找旧林道事件的更多细节。" },
+      { id: "D", title: "返回驿站核对传闻", description: "把公会听到的信息与驿站人员的说法对照。" }
+    ],
+    log: hero.name + " 抵达公会大厅，发现低阶委托板存在异常空缺。",
+    memory_entries: [
+      { type: "npc", tags: ["米拉", "公会"], text: "公会记录员米拉谨慎观察玩家，低阶委托板有三张任务牌被临时摘走。" },
+      { type: "world", tags: ["旧林道", "委托"], text: "公会大厅流传旧林道和失踪驮兽相关消息；当前时间推进到" + time + "，检索到" + memoryDocs.length + "条上下文。" }
+    ]
+  };
+}
+
+function mockInnBranch({ action, hero, time }) {
+  return {
+    location: "边境驿站",
+    active_events: ["驿站失踪两头驮兽", "守备队要求商队天黑后不得离站"],
+    scene: [
+      "你选择了：" + action,
+      "霍克擦杯子的动作停了一下。驿站大厅里有湿木头和热汤的味道，靠窗的商队护卫把声音压得很低，像是怕话题被门外的守备兵听见。",
+      "霍克没有立刻相信你。他把一枚裂开的马掌钉放到桌面上，钉身边缘发黑，像被某种酸液咬过。这个动作不是邀请你替他做决定，只是在试探你是否看得出问题。",
+      "“昨夜不是狼。”他说到这里便停住，视线扫过门口的守备兵。更多话需要代价、信任，或一个能让他相信你不会乱传的理由。"
+    ].join("\n\n"),
+    reactions: [
+      "霍克想知道你是求机会的新手，还是会把麻烦带进驿站的人。",
+      "门口的守备兵听见“昨夜”两个字后抬了一下头。",
+      "商队护卫互相交换眼神，他们显然也丢了东西。"
+    ],
+    npc_cards: baseNpcCards().slice(1),
+    options: [
+      { id: "A", title: "查看马掌钉", description: "只观察物证，不急着追问霍克的秘密。" },
+      { id: "B", title: "询问失踪驮兽", description: "围绕昨夜事件追问，但不承诺帮忙。" },
+      { id: "C", title: "留意守备兵反应", description: "判断守备队是否在隐瞒部分信息。" },
+      { id: "D", title: "前往公会核对", description: "把驿站线索与公会委托进行交叉验证。" }
+    ],
+    log: hero.name + " 从霍克处看到被腐蚀的马掌钉，旧林道事件可能不是普通野兽造成。",
+    memory_entries: [
+      { type: "plot", tags: ["驿站", "物证"], text: "霍克展示被腐蚀的马掌钉，暗示昨夜袭击者并非普通狼群。时间：" + time + "。" }
+    ]
+  };
+}
+
+function mockObserveBranch({ action, hero }) {
+  return {
+    location: "边境驿站外",
+    active_events: ["陌生书记员记录商队编号", "守备队封锁旧林道入口"],
+    scene: [
+      "你选择了：" + action,
+      "你没有急着靠近任何人。车轮碾过泥水，商队伙计搬下木箱，守备兵在路口换岗。多数人都在忙自己的事，世界没有因为你沉默观察而停摆。",
+      "几处细节逐渐浮出来：一名灰袍书记员正在记录商队编号，却故意避开公会方向；守备兵的靴底沾着暗绿色泥浆，而驿站附近没有这种泥；两个小贩谈到昨夜有“铃声”从旧林道传来。",
+      "这些信息还不能组成结论，但足够让你知道，边境的不安不是单纯魔兽出没。有人在记录，有人在封锁，也有人在害怕说错话。"
+    ].join("\n\n"),
+    reactions: [
+      "灰袍书记员察觉到有人在观察附近动线，暂时收起了记录册。",
+      "守备兵不愿让平民靠近旧林道，他们的紧张不像例行巡逻。",
+      "小贩们只敢交换碎片传闻，说明他们担心被追责。"
+    ],
+    npc_cards: [],
+    options: [
+      { id: "A", title: "跟踪灰袍书记员", description: "保持距离，弄清他记录商队编号的目的。" },
+      { id: "B", title: "检查守备兵靴印", description: "确认暗绿色泥浆是否来自旧林道。" },
+      { id: "C", title: "向小贩打听铃声", description: "用低风险方式收集昨夜传闻。" },
+      { id: "D", title: "转往公会", description: "寻找能公开验证这些线索的渠道。" }
+    ],
+    log: hero.name + " 通过观察发现书记员、守备兵和旧林道之间存在异常联系。",
+    memory_entries: [
+      { type: "world", tags: ["观察", "守备队", "旧林道"], text: "玩家观察到灰袍书记员记录商队编号，守备兵靴底带有暗绿色泥浆，小贩提到旧林道铃声。" }
+    ]
+  };
+}
+
+function mockTrailBranch({ action, hero, time }) {
+  return {
+    location: "旧林道边缘",
+    active_events: ["旧林道边缘发现非自然拖痕", "暗绿色泥浆与守备兵靴印吻合"],
+    scene: [
+      "你选择了：" + action,
+      "旧林道边缘比驿站冷。草叶被压弯，泥地里有断续的拖痕，像重物被硬生生拉进林中。你没有深入到无法回头的位置，只在边缘确认能够看见的痕迹。",
+      "泥里有兽蹄印，也有人类靴印。兽蹄印凌乱，靴印却成排出现，说明昨夜之后有人来过这里，而且不止一次。更奇怪的是，拖痕尽头挂着一小片红铜色鳞屑，摸上去冰凉，边缘带着淡淡酸味。",
+      "林中深处传来很轻的铃响，随即消失。它不像风，也不像牲畜。是否继续靠近，仍由你决定。"
+    ].join("\n\n"),
+    reactions: [
+      "林道深处的未知存在没有现身，但它似乎对边缘动静有反应。",
+      "如果附近有守备队暗哨，他们现在可能已经注意到有人接近封锁线。",
+      "红铜色鳞屑与普通魔兽不完全相符，值得保存或带去鉴定。"
+    ],
+    npc_cards: [],
+    options: [
+      { id: "A", title: "拾取鳞屑样本", description: "保存物证，暂不深入林道。" },
+      { id: "B", title: "沿靴印返回", description: "反向追踪昨夜来过这里的人。" },
+      { id: "C", title: "靠近铃声方向", description: "冒更高风险，尝试确认林中异常源头。" },
+      { id: "D", title: "撤回公会报告", description: "把已确认痕迹交给公会换取正式委托机会。" }
+    ],
+    log: hero.name + " 在旧林道边缘发现拖痕、成排靴印和红铜色鳞屑。",
+    memory_entries: [
+      { type: "item", tags: ["鳞屑", "旧林道"], text: "旧林道边缘存在红铜色鳞屑，冰凉且带酸味；时间推进到" + time + "。" }
+    ]
+  };
+}
+
+function mockSupplyBranch({ action, hero }) {
+  return {
+    location: "驿站集市",
+    active_events: ["补给价格上涨", "商会限制夜间出货"],
+    scene: [
+      "你选择了：" + action,
+      "驿站旁的小集市还没收摊，麻绳、火油、干粮和粗制短刃摆在木板上。摊主们的报价比平时高，尤其是火把和止血布，涨价幅度不像普通天气导致。",
+      "一个商会伙计正在把带商会纹章的箱子搬回仓库。他看见你停留，立刻把箱盖按紧。你能确认的只有一点：有人在为夜间封路做准备，而且消息比普通旅人知道得更早。",
+      "你可以补给，也可以追查价格异常背后的消息。购买什么、花多少钱、是否透露目的，都仍由你决定。"
+    ].join("\n\n"),
+    reactions: [
+      "摊主希望尽快卖出高价补给，但不想谈论涨价原因。",
+      "商会伙计担心箱内物品被陌生人看见。",
+      "几名新手冒险者正在犹豫是否合买一盏防风灯。"
+    ],
+    npc_cards: [],
+    options: [
+      { id: "A", title: "购买基础补给", description: "准备火把、干粮、绷带等低价物品。" },
+      { id: "B", title: "询问涨价原因", description: "向摊主打听夜间封路和物资短缺。" },
+      { id: "C", title: "观察商会箱子", description: "不靠近，只确认箱子纹章与搬运路线。" },
+      { id: "D", title: "回到公会", description: "确认是否有补给相关的低阶委托。" }
+    ],
+    log: hero.name + " 发现驿站集市补给价格异常上涨，商会似乎提前得到消息。",
+    memory_entries: [
+      { type: "faction", tags: ["商会", "补给"], text: "驿站集市火把、止血布等补给上涨，商会伙计提前收回带纹章箱子。" }
+    ]
+  };
+}
+
+function mockCautiousBranch({ action, hero }) {
+  return {
+    location: "边境驿站外",
+    active_events: ["旧林道传闻继续扩散", "公会和守备队互相观望"],
+    scene: [
+      "你选择了：" + action,
+      "你的行动被世界承认，但它没有替你决定意图。边境驿站外的人流继续移动，商队赶在天黑前清点货物，守备兵在旧林道入口换上第二班岗。",
+      "这一次行动带来的结果偏向保守：你没有立刻卷入冲突，也没有获得明确承诺，但你保留了选择余地。公会、驿站、旧林道和商会补给线都露出了可以继续追查的入口。",
+      "如果你想让局势更快推进，可以选择一个明确对象：问谁、看哪里、跟踪什么，或提交自定义行动。"
+    ].join("\n\n"),
+    reactions: [
+      "附近人物只是注意到你改变了位置，尚未形成明确判断。",
+      "守备队继续封锁旧林道，说明他们并不希望平民自由接近。",
+      "公会方向传来短促钟声，似乎有新的临时通知。"
+    ],
+    npc_cards: [],
+    options: [
+      { id: "A", title: "前往公会", description: "查看临时通知和新手登记。" },
+      { id: "B", title: "询问驿站老板", description: "打听昨夜失踪驮兽和旧林道传闻。" },
+      { id: "C", title: "保持距离观察", description: "继续记录人物动线和异常细节。" },
+      { id: "D", title: "检查旧林道边缘", description: "在不深入的前提下查看痕迹。" }
+    ],
+    log: hero.name + " 采取谨慎行动，保持了多条调查路线。",
+    memory_entries: [
+      { type: "note", tags: ["谨慎行动"], text: "玩家采取未明确指向的谨慎行动，当前可继续从公会、驿站、观察、旧林道四条路线推进。" }
     ]
   };
 }
