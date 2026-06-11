@@ -168,15 +168,23 @@ agents/novel-gm-agents.json
 
 ## RAG 检索方式
 
-当前版本使用轻量本地检索：
+当前版本使用轻量本地 RAG 索引：
 
 - 从玩家行动、主角、地点、NPC、势力中提取关键词。
-- 检索 `data/memories.json`。
-- 检索 `lore/**/*.md`。
-- 注入压缩会话摘要。
-- 注入当前结构化状态。
+- 把 `lore/**/*.md` 按 Markdown 小节切分为资料块。
+- 把 `data/memories.json`、压缩会话摘要和当前结构化状态纳入同一批检索语料。
+- 生成 `data/rag-index.json`，保存来源哈希、分块、轻量词向量和元数据。
+- 每轮 GM 生成前自动检查索引是否过期，过期则重建。
+- 按本地哈希词向量相似度、关键词重合、资料重要度和回合新近度混合排序。
 
-检索结果会包装为 LangChain `Document`，后续可以升级为 SQLite FTS、本地向量库或 PostgreSQL + pgvector。
+检索结果会包装为 LangChain `Document`，再注入 GM 链路。`data/rag-index.json` 是运行时生成物，默认不提交到 Git。
+
+可用接口：
+
+- `GET /api/rag/status`：查看索引是否存在、是否新鲜、文档块数量和索引签名。
+- `POST /api/rag/rebuild`：手动重建本地 RAG 索引。
+
+这个索引不依赖额外向量数据库，适合本地开箱即用。后续可以平滑升级为真实 Embedding、SQLite FTS、本地向量库或 PostgreSQL + pgvector。
 
 ## 开发脚本
 

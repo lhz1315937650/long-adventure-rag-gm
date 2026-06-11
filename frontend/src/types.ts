@@ -133,10 +133,22 @@ export interface GrowthProposal {
   patchFile?: string | null;
 }
 
+export interface RagIndexStatus {
+  exists: boolean;
+  fresh: boolean;
+  documentCount: number;
+  expectedDocumentCount: number;
+  dimensions: number;
+  sourceSignature?: string | null;
+  indexedSignature?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface BootstrapResponse {
   state: GameState;
   rules: Rules;
   loreCount: number;
+  ragIndex?: RagIndexStatus;
   growthDue: boolean;
   sessionSummary: SessionSummary;
   agentContract: AgentContract;

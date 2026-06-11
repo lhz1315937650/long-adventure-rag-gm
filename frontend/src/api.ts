@@ -1,4 +1,4 @@
-import type { BootstrapResponse, GameState, GrowthProposal, ProviderConfig } from "./types";
+import type { BootstrapResponse, GameState, GrowthProposal, ProviderConfig, RagIndexStatus } from "./types";
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
@@ -57,6 +57,17 @@ export function addLore(payload: { title: string; tags: string; content: string 
   return request<{ ok: true }>("/api/lore", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export function getRagStatus() {
+  return request<{ ok: true; index: RagIndexStatus }>("/api/rag/status");
+}
+
+export function rebuildRagIndex() {
+  return request<{ ok: true; index: Partial<RagIndexStatus> & { documentCount: number } }>("/api/rag/rebuild", {
+    method: "POST",
+    body: "{}"
   });
 }
 

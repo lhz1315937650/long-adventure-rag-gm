@@ -10,6 +10,7 @@ frontend/dist/
 # Runtime game state and long-term session memory
 data/state.json
 data/memories.json
+data/rag-index.json
 data/sessions/
 data/growth/
 

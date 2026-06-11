@@ -22,6 +22,7 @@ http://localhost:8787
 - `rules`：角色创建和规则数据。
 - `memoryCount`：运行时记忆条数。
 - `loreCount`：资料库文档数量。
+- `ragIndex`：本地 RAG 索引状态。
 - `growthDue`：是否建议运行自生长审计。
 - `sessionSummary`：压缩会话摘要。
 
@@ -70,6 +71,27 @@ http://localhost:8787
 ## GET /api/lore
 
 列出 `lore/` 资料库文档。
+
+## GET /api/rag/status
+
+查看本地 RAG 索引状态。
+
+返回：
+
+- `exists`：索引文件是否存在。
+- `fresh`：索引是否与当前资料库、记忆、摘要和结构化状态一致。
+- `documentCount`：当前索引内的文档块数量。
+- `expectedDocumentCount`：按当前语料应生成的文档块数量。
+- `dimensions`：本地词向量维度。
+- `sourceSignature`：当前语料签名。
+- `indexedSignature`：索引文件签名。
+- `updatedAt`：索引更新时间。
+
+## POST /api/rag/rebuild
+
+手动重建本地 RAG 索引。
+
+索引会写入 `data/rag-index.json`。这是运行时文件，默认不提交到 Git。
 
 ## GET /api/agents
 

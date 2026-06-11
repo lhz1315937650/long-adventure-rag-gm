@@ -8,6 +8,8 @@ import {
   exportData,
   getBootstrap,
   getGrowthProposals,
+  getRagStatus,
+  rebuildRagIndex,
   resetGame,
   runTurn,
   testProviderConnection
@@ -19,6 +21,7 @@ import type {
   GrowthProposal,
   LastTurn,
   NpcCard,
+  RagIndexStatus,
   Race,
   Rules,
   SessionSummary,
@@ -33,6 +36,7 @@ function App() {
   const [rules, setRules] = useState<Rules | null>(null);
   const [sessionSummary, setSessionSummary] = useState<SessionSummary | null>(null);
   const [loreCount, setLoreCount] = useState(0);
+  const [ragIndex, setRagIndex] = useState<RagIndexStatus | null>(null);
   const [growthDue, setGrowthDue] = useState(false);
   const [growthProposals, setGrowthProposals] = useState<GrowthProposal[]>([]);
   const [agentContract, setAgentContract] = useState<AgentContract | null>(null);
@@ -56,6 +60,7 @@ function App() {
       setRules(data.rules);
       setSessionSummary(data.sessionSummary);
       setLoreCount(data.loreCount || 0);
+      setRagIndex(data.ragIndex || null);
       setGrowthDue(Boolean(data.growthDue));
       setAgentContract(data.agentContract || null);
       await refreshGrowthProposals();
@@ -94,8 +99,18 @@ function App() {
     const data = await resetGame();
     setState(data.state);
     setSessionSummary(null);
+    await refreshRagStatus();
     setGrowthDue(false);
     await refreshGrowthProposals();
+  }
+
+  async function refreshRagStatus() {
+    try {
+      const data = await getRagStatus();
+      setRagIndex(data.index);
+    } catch {
+      setRagIndex(null);
+    }
   }
 
   async function withBusy(task: () => Promise<void>, message = "正在处理...") {
@@ -166,6 +181,7 @@ function App() {
             state={state}
             sessionSummary={sessionSummary}
             loreCount={loreCount}
+            ragIndex={ragIndex}
             growthDue={growthDue}
             growthProposals={growthProposals}
             agentContract={agentContract}
@@ -176,13 +192,20 @@ function App() {
               setState(data.state);
               setSessionSummary(data.sessionSummary);
               setGrowthDue(Boolean(data.growthDue));
+              await refreshRagStatus();
               await refreshGrowthProposals();
             }, provider.mode === "mock" ? "正在运行本地演示回合..." : "智能体正在生成下一轮剧情...")}
             onAddLore={(payload) => withBusy(async () => {
               await addLore(payload);
               setLoreCount((count) => count + 1);
+              await refreshRagStatus();
               showNotice("资料已保存到项目资料库。");
             }, "正在保存资料...")}
+            onRebuildRag={() => withBusy(async () => {
+              await rebuildRagIndex();
+              await refreshRagStatus();
+              showNotice("RAG 索引已重建。");
+            }, "正在重建 RAG 索引...")}
             onAnalyzeGrowth={() => withBusy(async () => {
               if (!validateRealProvider()) return;
               const data = await analyzeGrowth(provider);
@@ -372,24 +395,28 @@ function GameView({
   state,
   sessionSummary,
   loreCount,
+  ragIndex,
   growthDue,
   growthProposals,
   agentContract,
   busy,
   onAction,
   onAddLore,
+  onRebuildRag,
   onAnalyzeGrowth,
   onDecideProposal
 }: {
   state: GameState;
   sessionSummary: SessionSummary | null;
   loreCount: number;
+  ragIndex: RagIndexStatus | null;
   growthDue: boolean;
   growthProposals: GrowthProposal[];
   agentContract: AgentContract | null;
   busy: boolean;
   onAction: (action: string) => void;
   onAddLore: (payload: { title: string; tags: string; content: string }) => void;
+  onRebuildRag: () => void;
   onAnalyzeGrowth: () => void;
   onDecideProposal: (id: string, decision: "accepted" | "rejected") => void;
 }) {
@@ -452,6 +479,7 @@ function GameView({
           <div className="mini-card small">{renderSessionSummary(sessionSummary)}</div>
         </section>
         <LorePanel loreCount={loreCount} onAddLore={onAddLore} />
+        <RagPanel ragIndex={ragIndex} onRebuild={onRebuildRag} />
         <GrowthPanel growthDue={growthDue} proposals={growthProposals} onAnalyze={onAnalyzeGrowth} onDecide={onDecideProposal} />
         <AgentPanel agentContract={agentContract} />
       </aside>
@@ -606,6 +634,23 @@ function LorePanel({ loreCount, onAddLore }: { loreCount: number; onAddLore: (pa
           setContent("");
         }}>保存资料</button>
       </div>
+    </section>
+  );
+}
+
+function RagPanel({ ragIndex, onRebuild }: { ragIndex: RagIndexStatus | null; onRebuild: () => void }) {
+  const status = ragIndex?.fresh ? "已同步" : ragIndex?.exists ? "需要重建" : "未建立";
+  const signature = ragIndex?.indexedSignature || ragIndex?.sourceSignature || "";
+  return (
+    <section>
+      <h2>RAG 索引</h2>
+      <div className="mini-card small">
+        <p>状态：{status}</p>
+        <p>文档块：{ragIndex?.documentCount ?? 0} / {ragIndex?.expectedDocumentCount ?? 0}</p>
+        <p>维度：{ragIndex?.dimensions ?? 0}</p>
+        {signature ? <p>签名：{signature.slice(0, 10)}</p> : null}
+      </div>
+      <button className="ghost-btn section" onClick={onRebuild}>重建索引</button>
     </section>
   );
 }

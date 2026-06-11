@@ -22,9 +22,11 @@ const PROPOSALS_DIR = path.join(GROWTH_DIR, "proposals");
 const DEFAULT_SESSION_ID = "default";
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const MEMORY_FILE = path.join(DATA_DIR, "memories.json");
+const RAG_INDEX_FILE = path.join(DATA_DIR, "rag-index.json");
 const RULES_FILE = path.join(DATA_DIR, "rules.json");
 const PROMPT_FILE = path.join(__dirname, "prompts", "gm-system.md");
 const AGENTS_FILE = path.join(__dirname, "agents", "novel-gm-agents.json");
+const RAG_VECTOR_DIMENSIONS = 256;
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -40,6 +42,7 @@ const server = http.createServer(async (req, res) => {
         rules: readJson(RULES_FILE),
         memoryCount: readJson(MEMORY_FILE).length,
         loreCount: listLoreDocuments().length,
+        ragIndex: getRagIndexStatus(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID)),
         agentContract: readAgentContract(),
         growthDue: isGrowthAuditDue(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID)),
         sessionSummary: readSessionSummary(DEFAULT_SESSION_ID)
@@ -58,6 +61,15 @@ const server = http.createServer(async (req, res) => {
       const payload = await readBody(req);
       const document = createLoreDocument(payload);
       return sendJson(res, { ok: true, document });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/rag/status") {
+      return sendJson(res, { ok: true, index: getRagIndexStatus(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID)) });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/rag/rebuild") {
+      const index = buildRagIndex(readJson(STATE_FILE), readSessionSummary(DEFAULT_SESSION_ID));
+      return sendJson(res, { ok: true, index: summarizeRagIndex(index) });
     }
 
     if (req.method === "GET" && url.pathname === "/api/export") {
@@ -1251,44 +1263,251 @@ function retrieveMemoryDocuments(action, state) {
 }
 
 function retrieveContextDocuments(action, state, sessionSummary) {
-  const runtimeDocuments = retrieveMemoryDocuments(action, state);
-  const loreDocuments = retrieveLoreDocuments(action, state);
-  const summaryDocument = new Document({
-    pageContent: sessionSummary?.summary || "暂无压缩会话记忆。",
+  const index = ensureRagIndex(state, sessionSummary);
+  const query = buildRagQuery(action, state);
+  const documents = searchRagIndex(index, query, 20);
+  const pinned = buildPinnedRagDocuments(state, sessionSummary);
+  const merged = dedupeDocuments([...pinned, ...documents]);
+  return merged.slice(0, 20);
+}
+
+function buildRagQuery(action, state) {
+  return [
+    action,
+    state.hero?.name,
+    state.hero?.race?.name,
+    state.world?.location,
+    ...(state.world?.active_events || []),
+    ...(state.npcs || []).map((npc) => npc.name),
+    ...(state.factions || []).map((faction) => faction.name)
+  ].filter(Boolean).join(" ");
+}
+
+function getRagIndexStatus(state, sessionSummary) {
+  const corpus = buildRagSourceDocuments(state, sessionSummary);
+  const signature = makeRagSourceSignature(corpus);
+  const index = readRagIndex();
+  return {
+    exists: Boolean(index),
+    fresh: Boolean(index && index.sourceSignature === signature),
+    documentCount: index?.documents?.length || 0,
+    expectedDocumentCount: corpus.length,
+    dimensions: index?.dimensions || RAG_VECTOR_DIMENSIONS,
+    sourceSignature: signature,
+    indexedSignature: index?.sourceSignature || null,
+    updatedAt: index?.updatedAt || null
+  };
+}
+
+function ensureRagIndex(state, sessionSummary) {
+  const corpus = buildRagSourceDocuments(state, sessionSummary);
+  const signature = makeRagSourceSignature(corpus);
+  const existing = readRagIndex();
+  if (existing && existing.sourceSignature === signature && Array.isArray(existing.documents)) return existing;
+  return buildRagIndexFromCorpus(corpus, signature);
+}
+
+function buildRagIndex(state, sessionSummary) {
+  const corpus = buildRagSourceDocuments(state, sessionSummary);
+  return buildRagIndexFromCorpus(corpus, makeRagSourceSignature(corpus));
+}
+
+function buildRagIndexFromCorpus(corpus, sourceSignature) {
+  const index = {
+    version: 1,
+    algorithm: "local-hashed-tf-cosine",
+    dimensions: RAG_VECTOR_DIMENSIONS,
+    sourceSignature,
+    updatedAt: new Date().toISOString(),
+    documents: corpus.map((doc) => {
+      const text = `${doc.metadata.title || ""} ${(doc.metadata.tags || []).join(" ")} ${doc.pageContent}`;
+      return {
+        id: doc.metadata.id,
+        pageContent: doc.pageContent,
+        metadata: doc.metadata,
+        vector: makeSparseVector(text),
+        tokens: [...tokenize(text)],
+        contentHash: hashText(text)
+      };
+    })
+  };
+  writeJson(RAG_INDEX_FILE, index);
+  return index;
+}
+
+function readRagIndex() {
+  if (!fs.existsSync(RAG_INDEX_FILE)) return null;
+  try {
+    return readJson(RAG_INDEX_FILE);
+  } catch {
+    return null;
+  }
+}
+
+function summarizeRagIndex(index) {
+  return {
+    version: index.version,
+    algorithm: index.algorithm,
+    dimensions: index.dimensions,
+    documentCount: index.documents.length,
+    sourceSignature: index.sourceSignature,
+    updatedAt: index.updatedAt
+  };
+}
+
+function buildRagSourceDocuments(state, sessionSummary) {
+  const loreDocuments = listLoreDocuments()
+    .flatMap((item) => chunkLoreDocument(item))
+    .map((chunk) => new Document({
+      pageContent: [
+        `# ${chunk.title}`,
+        chunk.heading ? `## ${chunk.heading}` : "",
+        chunk.content
+      ].filter(Boolean).join("\n\n"),
+      metadata: {
+        id: `lore:${chunk.path}#${chunk.index}`,
+        type: "lore",
+        title: chunk.title,
+        tags: chunk.tags || [],
+        turn: null,
+        createdAt: chunk.updatedAt,
+        sourceUpdatedAt: chunk.updatedAt,
+        importance: 2,
+        sourcePath: chunk.path,
+        heading: chunk.heading
+      }
+    }));
+
+  const memoryDocuments = readJson(MEMORY_FILE).map((memory) => new Document({
+    pageContent: memory.text || "",
     metadata: {
-      id: "session-summary",
-      type: "session_summary",
-      tags: ["session", "summary"],
-      turn: state.turn || 0,
-      createdAt: sessionSummary?.updatedAt || null,
-      importance: 2
+      id: `memory:${memory.id}`,
+      type: memory.type || "note",
+      title: memory.type || "memory",
+      tags: memory.tags || [],
+      turn: memory.turn,
+      createdAt: memory.createdAt,
+      sourceUpdatedAt: memory.createdAt,
+      importance: memory.importance || 1
     }
-  });
-  const stateDocument = new Document({
-    pageContent: JSON.stringify({
-      hero: state.hero,
-      world: state.world,
-      npcs: state.npcs,
-      factions: state.factions,
-      abilities: state.abilities,
-      inventory: state.inventory
-    }, null, 2),
-    metadata: {
-      id: "structured-state",
-      type: "structured_state",
-      tags: ["state", "hero", "world"],
-      turn: state.turn || 0,
-      createdAt: new Date().toISOString(),
-      importance: 3
-    }
-  });
+  }));
 
   return [
-    stateDocument,
-    summaryDocument,
-    ...runtimeDocuments,
+    ...buildPinnedRagDocuments(state, sessionSummary),
+    ...memoryDocuments,
     ...loreDocuments
-  ].slice(0, 20);
+  ].filter((doc) => String(doc.pageContent || "").trim());
+}
+
+function buildPinnedRagDocuments(state, sessionSummary) {
+  const summaryText = sessionSummary?.summary || "暂无压缩会话记忆。";
+  return [
+    new Document({
+      pageContent: JSON.stringify({
+        hero: state.hero,
+        world: state.world,
+        npcs: state.npcs,
+        factions: state.factions,
+        abilities: state.abilities,
+        inventory: state.inventory
+      }, null, 2),
+      metadata: {
+        id: "structured-state",
+        type: "structured_state",
+        title: "结构化世界状态",
+        tags: ["state", "hero", "world"],
+        turn: state.turn || 0,
+        createdAt: new Date().toISOString(),
+        sourceUpdatedAt: `turn-${state.turn || 0}`,
+        importance: 4
+      }
+    }),
+    new Document({
+      pageContent: summaryText,
+      metadata: {
+        id: "session-summary",
+        type: "session_summary",
+        title: "压缩会话记忆",
+        tags: ["session", "summary"],
+        turn: state.turn || 0,
+        createdAt: sessionSummary?.updatedAt || null,
+        sourceUpdatedAt: sessionSummary?.updatedAt || "empty",
+        importance: 3
+      }
+    })
+  ];
+}
+
+function makeRagSourceSignature(documents) {
+  return hashText(JSON.stringify(documents.map((doc) => ({
+    id: doc.metadata.id,
+    sourceUpdatedAt: doc.metadata.sourceUpdatedAt,
+    turn: doc.metadata.turn,
+    hash: hashText(doc.pageContent)
+  }))));
+}
+
+function searchRagIndex(index, query, limit = 20) {
+  const queryVector = makeSparseVector(query);
+  const queryTokens = tokenize(query);
+  return (index.documents || [])
+    .map((entry) => {
+      const tokens = new Set(entry.tokens || []);
+      const overlap = [...queryTokens].filter((token) => tokens.has(token)).length;
+      const titleTokens = tokenize(`${entry.metadata?.title || ""} ${entry.metadata?.heading || ""}`);
+      const titleBoost = [...titleTokens].filter((token) => queryTokens.has(token)).length * 0.6;
+      const importanceBoost = Number(entry.metadata?.importance || 1) * 0.2;
+      const recencyBoost = Math.min(0.5, Math.max(0, Number(entry.metadata?.turn || 0)) / 100);
+      const vectorScore = cosineSimilarity(queryVector, entry.vector || []);
+      return {
+        entry,
+        score: vectorScore * 8 + overlap + titleBoost + importanceBoost + recencyBoost
+      };
+    })
+    .filter(({ score, entry }) => score > 0.3 || ["structured_state", "session_summary"].includes(entry.metadata?.type))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ entry, score }) => new Document({
+      pageContent: entry.pageContent,
+      metadata: {
+        ...entry.metadata,
+        score,
+        ragAlgorithm: index.algorithm
+      }
+    }));
+}
+
+function dedupeDocuments(documents) {
+  const seen = new Set();
+  const result = [];
+  for (const doc of documents) {
+    const id = doc.metadata?.id || hashText(doc.pageContent || "");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(doc);
+  }
+  return result;
+}
+
+function makeSparseVector(text) {
+  const vector = Array(RAG_VECTOR_DIMENSIONS).fill(0);
+  for (const term of tokenizeTerms(text)) {
+    const index = parseInt(hashText(term).slice(0, 8), 16) % RAG_VECTOR_DIMENSIONS;
+    vector[index] += 1;
+  }
+  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return magnitude ? vector.map((value) => Number((value / magnitude).toFixed(6))) : vector;
+}
+
+function cosineSimilarity(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return 0;
+  let score = 0;
+  for (let index = 0; index < left.length; index += 1) score += Number(left[index] || 0) * Number(right[index] || 0);
+  return score;
+}
+
+function hashText(text) {
+  return crypto.createHash("sha256").update(String(text || "")).digest("hex");
 }
 
 function retrieveLoreDocuments(action, state) {
@@ -1723,10 +1942,19 @@ function messageContentToText(content) {
 }
 
 function tokenize(text) {
-  const normalized = String(text).toLowerCase();
+  return new Set(tokenizeTerms(text));
+}
+
+function tokenizeTerms(text) {
+  const normalized = String(text || "").toLowerCase();
   const latin = normalized.match(/[a-z0-9_-]{2,}/g) || [];
-  const cjk = normalized.match(/[\u4e00-\u9fff]{1,2}/g) || [];
-  return new Set([...latin, ...cjk]);
+  const cjkText = normalized.replace(/[^\u4e00-\u9fff]/g, "");
+  const cjk = [];
+  for (let index = 0; index < cjkText.length; index += 1) {
+    cjk.push(cjkText.slice(index, index + 1));
+    if (index + 1 < cjkText.length) cjk.push(cjkText.slice(index, index + 2));
+  }
+  return [...latin, ...cjk].filter(Boolean);
 }
 
 function appendMemories(entries) {
